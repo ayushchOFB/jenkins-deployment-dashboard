@@ -11,7 +11,7 @@
 const cron = require('node-cron');
 const fs = require('fs');
 const yaml = require('js-yaml');
-const { triggerJob, fetchReleaseStatus, fetchBuild } = require('./jenkinsService');
+const { triggerJob, fetchReleaseStatus, fetchBuild, fetchJobEnvMap } = require('./jenkinsService');
 const { sendDeploymentNotification } = require('./chatNotificationService');
 const schedulerConfig = require('../scheduler.config');
 const config = require('../jobs.config');
@@ -187,26 +187,41 @@ const pollPipelineCompletion = async (previousBuildNumber = 0) => {
                 continue;
             }
 
-            // Build finished — extract stage results (only deploy stages)
-            const stages = (releaseStatus.stages || [])
-                .filter(s => {
-                    const name = s.name || '';
-                    // Only include actual deploy stages, skip pipeline overhead
-                    return name.startsWith('Deploy:');
-                })
-                .map(s => {
-                    const stageName = s.name || 'Unknown';
-                    const jobUrl = buildDownstreamJobUrl(stageName);
-                    return {
-                        job: stageName,
-                        status: normaliseStageStatus(s.status),
-                        url: jobUrl || buildUrl,
-                        durationMs: s.durationMillis || 0,
-                    };
-                });
+            // Build finished — extract deploy stages and verify actual downstream status
+            const deployStages = (releaseStatus.stages || []).filter(s => (s.name || '').startsWith('Deploy:'));
+
+            const stages = await Promise.all(deployStages.map(async (s) => {
+                const stageName = s.name || 'Unknown';
+                const { jenkinsJob, jobUrl } = resolveDownstreamJob(stageName);
+
+                // Check actual downstream job status (wfapi lies due to propagate:false)
+                let actualStatus = normaliseStageStatus(s.status);
+                if (jenkinsJob) {
+                    try {
+                        const downstream = await fetchJobEnvMap(jenkinsJob);
+                        if (downstream.lastBuild) {
+                            actualStatus = downstream.lastBuild.status;
+                        }
+                    } catch (_) { /* fall back to stage status */ }
+                }
+
+                return {
+                    job: stageName,
+                    status: actualStatus,
+                    url: jobUrl || buildUrl,
+                    durationMs: s.durationMillis || 0,
+                };
+            }));
+
+            // Recalculate overall status based on actual results
+            const hasFailures = stages.some(s => s.status === 'FAILED' || s.status === 'ERROR');
+            const hasAborted = stages.some(s => s.status === 'ABORTED');
+            let overallStatus = releaseStatus.status;
+            if (hasFailures) overallStatus = 'FAILED';
+            else if (hasAborted) overallStatus = 'ABORTED';
 
             return {
-                overallStatus: releaseStatus.status,
+                overallStatus,
                 stages,
                 buildUrl,
             };
@@ -221,28 +236,30 @@ const pollPipelineCompletion = async (previousBuildNumber = 0) => {
 };
 
 /**
- * Extract Jenkins job name from stage name and build a direct URL.
- * Stage names look like: "Deploy: OFB-Compile-Deploy", "Deploy: BUYER-FE (Website)"
- * Maps back to jenkins_job from jobs.yaml for the correct URL.
+ * Extract Jenkins job name from stage name and resolve URL + job name.
+ * Stage names: "Deploy: OFB-Compile-Deploy", "Deploy: BUYER-FE (Website)"
+ * Returns { jenkinsJob, jobUrl }
  */
-const buildDownstreamJobUrl = (stageName) => {
-    // "Deploy: OFB-Compile-Deploy" → "OFB-Compile-Deploy"
-    // "Deploy: BUYER-FE (Website)" → "BUYER-FE"
-    // "Deploy: Merge-FE (Web_site - ADMIN)" → "Merge-FE"
+const resolveDownstreamJob = (stageName) => {
     const match = stageName.match(/^Deploy:\s*(.+?)(?:\s*\(.*\))?$/);
-    if (!match) return null;
+    if (!match) return { jenkinsJob: null, jobUrl: null };
 
     const displayName = match[1].trim();
 
-    // Look up jenkins_job from jobs.yaml
     try {
         const fileContents = fs.readFileSync('./jobs.yaml', 'utf8');
         const data = yaml.load(fileContents);
         const jobMeta = (data.jobs || []).find(j => j.name === displayName);
         const jenkinsJob = jobMeta ? jobMeta.jenkins_job : displayName;
-        return `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(jenkinsJob)}/`;
+        return {
+            jenkinsJob,
+            jobUrl: `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(jenkinsJob)}/`,
+        };
     } catch (_) {
-        return `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(displayName)}/`;
+        return {
+            jenkinsJob: displayName,
+            jobUrl: `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(displayName)}/`,
+        };
     }
 };
 
