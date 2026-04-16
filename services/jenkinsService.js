@@ -282,9 +282,9 @@ const fetchReleaseStatus = async () => {
     const status = await fetchJobEnvMap(jobName);
     const lastBuild = status.lastBuild;
 
-    if (lastBuild && lastBuild.number) {
+    if (lastBuild && lastBuild.buildNumber) {
         try {
-            const stages = await fetchPipelineStages(jobName, lastBuild.number);
+            const stages = await fetchPipelineStages(jobName, lastBuild.buildNumber);
             lastBuild.stages = stages;
         } catch (e) {
             console.error('[Jenkins] Stages fetch failed:', e.message);

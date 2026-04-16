@@ -118,6 +118,7 @@ jobs:
     jenkins_job: "OFB-Compile-Deploy"
     type: "backend"
     fe_type: "none"
+    env_prefix: "ofb_"
 
   - name: "OFB-FS-Compile"
     jenkins_job: "OFB-FS-Compile"
