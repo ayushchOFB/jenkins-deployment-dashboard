@@ -219,6 +219,7 @@ const renderTable = () => {
 // ── Environment Selection ──────────────────────────────────────────────────
 window.selectEnv = (env) => {
     activeEnv = env;
+    serverStatus = []; // Clear old env data so skeleton shows immediately
     renderTabs();
     renderTable();
     fetchServerStatus(true, true); // quiet = true, isTabSwitch = true
@@ -226,8 +227,8 @@ window.selectEnv = (env) => {
     // Kick off a background Jenkins refresh when switching tabs
     // so any new deployments are pulled automatically for this fresh view.
     if (!isFetchingData) {
-        fetchData(true);
-        startCountdown(); // Reset the 30-sec refresh timer
+        fetchData(true, true); // skipServerStatus — selectEnv already handles it
+        startCountdown();
     }
 };
 
@@ -241,7 +242,7 @@ const populateJobFilter = () => {
 };
 
 // ── Fetch & Refresh ────────────────────────────────────────────────────────
-const fetchData = async (quiet = false) => {
+const fetchData = async (quiet = false, skipServerStatus = false) => {
     if (isFetchingData) return;
     isFetchingData = true;
 
@@ -255,20 +256,42 @@ const fetchData = async (quiet = false) => {
     document.querySelector('.rdot').classList.add('loading');
 
     try {
-        const res = await fetch('/api/deployments');
-        if (!res.ok) throw new Error(`Server: ${res.status}`);
-        allDeployments = await res.json();
+        const MAX_RETRIES = 2;
+        let success = false;
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
+                const res = await fetch('/api/deployments', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (!res.ok) throw new Error(`Server: ${res.status}`);
+                allDeployments = await res.json();
 
-        renderTabs();
-        populateJobFilter();
-        renderTable();
+                $('loadingState').classList.add('hidden');
+                $('emptyState').classList.add('hidden');
+                $('tableWrap').classList.remove('hidden');
+                renderTabs();
+                populateJobFilter();
+                renderTable();
 
-        if (!quiet) showToast(`✅ Loaded ${allDeployments.length} deployments`);
-    } catch (err) {
-        console.error('Fetch error:', err);
-        $('loadingState').classList.add('hidden');
-        $('emptyState').classList.remove('hidden');
-        if (!quiet) showToast('⚠️ Failed to load Jenkins data', 'err');
+                if (!quiet) showToast(`✅ Loaded ${allDeployments.length} deployments`);
+                success = true;
+                break;
+            } catch (err) {
+                console.error(`Fetch error (attempt ${attempt}/${MAX_RETRIES}):`, err);
+                if (attempt < MAX_RETRIES) {
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            }
+        }
+        if (!success) {
+            $('loadingState').classList.add('hidden');
+            // Only show empty state if we have no existing data
+            if (!allDeployments.length) {
+                $('emptyState').classList.remove('hidden');
+            }
+            if (!quiet) showToast('⚠️ Failed to load Jenkins data', 'err');
+        }
     } finally {
         $('refreshBtn').classList.remove('spinning');
         $('refreshText').textContent = 'Live';
@@ -276,8 +299,8 @@ const fetchData = async (quiet = false) => {
         isFetchingData = false;
     }
 
-    // Also fetch server status
-    await fetchServerStatus(quiet);
+    // Also fetch server status (skip if tab switch already triggered it)
+    if (!skipServerStatus) await fetchServerStatus(quiet);
 };
 
 const fetchServerStatus = async (quiet = false, isTabSwitch = false) => {
@@ -287,14 +310,22 @@ const fetchServerStatus = async (quiet = false, isTabSwitch = false) => {
         return;
     }
 
-    // Only clear existing cards for a spinner if we just switched to a new tab
-    if (isTabSwitch) {
-        const section = $('serverStatusSection');
-        const grid = $('serverGrid');
-        const summary = $('statusSummary');
-        section.classList.remove('hidden');
-        grid.innerHTML = '<div style="grid-column: 1/-1; padding: 20px; text-align: center; color: var(--text-muted);"><div class="spinner" style="display:inline-block; vertical-align:middle; margin-right:10px;"></div> Checking services...</div>';
+    const section = $('serverStatusSection');
+    const grid = $('serverGrid');
+    const summary = $('statusSummary');
+    section.classList.remove('hidden');
+
+    // Show skeleton cards while loading (always on first load or tab switch, not on quiet refresh if we have data)
+    if (!serverStatus.length || isTabSwitch) {
         summary.textContent = 'Checking services...';
+        grid.innerHTML = Array.from({ length: 6 }, () => `
+            <div class="server-card skeleton-card">
+                <div class="skeleton-line" style="width:60%;height:14px;margin-bottom:8px"></div>
+                <div class="skeleton-line" style="width:40%;height:12px;margin-bottom:16px"></div>
+                <div class="skeleton-line" style="width:30%;height:12px;margin-bottom:12px"></div>
+                <div class="skeleton-line" style="width:50%;height:10px"></div>
+            </div>
+        `).join('');
     }
 
     try {
@@ -678,15 +709,15 @@ const renderRMHistory = (history) => {
     });
 
     list.innerHTML = Object.entries(groups).map(([label, builds]) => `
-        <div class="history-group">
-            <div class="history-group-label">${label}</div>
+        <div class="rm-history-group">
+            <div class="rm-history-group-label">${label}</div>
             ${builds.map(b => {
                 const res = (b.status || 'unknown').toLowerCase();
                 const icon = res === 'success' ? '✓' : res === 'running' ? '●' : '✕';
                 const time = new Date(b.timestamp).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
                 return `
-                    <a href="${b.url}" target="_blank" class="history-item-link">
-                        <div class="history-item">
+                    <a href="${b.url}" target="_blank" class="rm-history-item-link">
+                        <div class="rm-history-item">
                             <div class="hi-status-icon ${res}">${icon}</div>
                             <div class="hi-number">#${b.buildNumber}</div>
                             <div class="hi-time">${time}</div>

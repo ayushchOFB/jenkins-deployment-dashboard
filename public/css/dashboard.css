@@ -1787,7 +1787,7 @@ select {
 }
 
 .hi-status-icon.success { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
-.hi-status-icon.failure { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+.hi-status-icon.failure, .hi-status-icon.failed { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
 .hi-status-icon.aborted { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
 .hi-status-icon.running { background: rgba(245, 158, 11, 0.2); color: #f59e0b; animation: pulse 2s infinite; }
 
@@ -1902,4 +1902,21 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Skeleton loader for System Health Monitor */
+.skeleton-card {
+  opacity: 0.6;
+}
+
+.skeleton-line {
+  background: linear-gradient(90deg, var(--card-bg) 25%, rgba(255,255,255,0.08) 50%, var(--card-bg) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
