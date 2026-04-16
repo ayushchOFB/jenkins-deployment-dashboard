@@ -112,19 +112,10 @@ jobs:
     jenkins_job: "Notification-Deploy"
     type: "backend"
     fe_type: "none"
-
-  - name: "OFB-Compile"
-    jenkins_job: "OFB-Compile"
-    type: "backend"
-    fe_type: "none"
+    env_prefix: "ofb_"
 
   - name: "OFB-Compile-Deploy"
     jenkins_job: "OFB-Compile-Deploy"
-    type: "backend"
-    fe_type: "none"
-
-  - name: "OFB-Deploy"
-    jenkins_job: "OFB-Deploy"
     type: "backend"
     fe_type: "none"
 
@@ -200,18 +191,9 @@ jobs:
     fe_type: "standard"
 
   # --- Group 3: Orion Services ---
-  - name: "Orion-Compile"
-    jenkins_job: "Orion-Compile"
-    type: "orion"
-    fe_type: "none"
 
   - name: "Orion-Compile-Deploy"
     jenkins_job: "Orion-Compile-Deploy"
-    type: "orion"
-    fe_type: "none"
-
-  - name: "Orion-Deploy"
-    jenkins_job: "Orion-Deploy"
     type: "orion"
     fe_type: "none"
 
