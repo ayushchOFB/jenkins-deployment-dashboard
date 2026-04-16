@@ -62,7 +62,17 @@ const runScheduledDeployment = async ({ branch, env, triggeredBy } = {}) => {
         }
         console.log(`[Scheduler] Deploying ${jobsToRelease.length} jobs: ${jobsToRelease.join(', ')}`);
 
-        // Step 2: Trigger the pipeline
+        // Step 2: Note current latest build number before triggering
+        let previousBuildNumber = 0;
+        try {
+            const currentStatus = await fetchReleaseStatus();
+            if (currentStatus && currentStatus.buildNumber) {
+                previousBuildNumber = currentStatus.buildNumber;
+            }
+        } catch (_) { /* ignore — first ever build */ }
+        console.log(`[Scheduler] Current latest build: #${previousBuildNumber}`);
+
+        // Step 3: Trigger the pipeline
         await triggerJob(PIPELINE_JOB, {
             RELEASE_BRANCH: effectiveBranch,
             STG_ENV: effectiveEnv,
@@ -70,11 +80,10 @@ const runScheduledDeployment = async ({ branch, env, triggeredBy } = {}) => {
             LIBS_TO_DEPLOY: '',
             DRY_RUN: 'false',
         });
-        console.log('[Scheduler] Pipeline triggered, waiting for build to start...');
+        console.log('[Scheduler] Pipeline triggered, waiting for new build to start...');
 
-        // Step 3: Wait for build to appear and complete
-        await sleep(5000); // brief wait for Jenkins to queue the build
-        const pipelineResult = await pollPipelineCompletion();
+        // Step 4: Wait for new build to appear and complete
+        const pipelineResult = await pollPipelineCompletion(previousBuildNumber);
 
         // Step 4: Aggregate results
         runRecord.results = pipelineResult.stages;
@@ -140,10 +149,11 @@ const getDeployableJobs = () => {
 // ── Pipeline Polling ─────────────────────────────────────────────────────────
 
 /**
- * Poll Jenkins until the QA-Release-Deployment build completes.
+ * Poll Jenkins until a NEW QA-Release-Deployment build completes.
+ * @param {number} previousBuildNumber - Build number before we triggered; wait for a higher one.
  * Returns { overallStatus, stages: [{ job, status, url }], buildUrl }
  */
-const pollPipelineCompletion = async () => {
+const pollPipelineCompletion = async (previousBuildNumber = 0) => {
     const startTime = Date.now();
     const timeoutMs = schedulerConfig.POLL_TIMEOUT_MS;
     const pollMs = schedulerConfig.POLL_INTERVAL_MS;
@@ -158,13 +168,20 @@ const pollPipelineCompletion = async () => {
                 continue;
             }
 
+            // Skip if this is still the old build
+            if (releaseStatus.buildNumber <= previousBuildNumber) {
+                console.log(`[Scheduler] Waiting for new build (current: #${releaseStatus.buildNumber}, need > #${previousBuildNumber})...`);
+                await sleep(pollMs);
+                continue;
+            }
+
             const buildUrl = releaseStatus.url || `${config.JENKINS_BASE_URL}/job/${PIPELINE_JOB}/`;
 
             // Check if build is still running
             if (releaseStatus.status === 'RUNNING') {
                 const stageCount = (releaseStatus.stages || []).length;
                 const completed = (releaseStatus.stages || []).filter(s => s.status !== 'IN_PROGRESS').length;
-                console.log(`[Scheduler] Pipeline running... (${completed}/${stageCount} stages done)`);
+                console.log(`[Scheduler] Pipeline #${releaseStatus.buildNumber} running... (${completed}/${stageCount} stages done)`);
                 await sleep(pollMs);
                 continue;
             }
