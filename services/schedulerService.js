@@ -35,7 +35,7 @@ const PIPELINE_JOB = 'QA-Release-Deployment';
  * Triggers the Jenkins pipeline with all jobs, polls for completion,
  * then sends notification.
  */
-const runScheduledDeployment = async ({ branch, env, triggeredBy } = {}) => {
+const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy } = {}) => {
     const effectiveBranch = branch || schedulerConfig.DEFAULT_BRANCH;
     const effectiveEnv = env || schedulerConfig.TARGET_ENV;
     const startedAt = new Date().toISOString();
@@ -55,8 +55,8 @@ const runScheduledDeployment = async ({ branch, env, triggeredBy } = {}) => {
     console.log(`[Scheduler] Starting scheduled deployment: env=${effectiveEnv}, branch=${effectiveBranch}`);
 
     try {
-        // Step 1: Fetch all deployable jobs (excluding Deploy-Libs and other excluded jobs)
-        const jobsToRelease = getDeployableJobs();
+        // Step 1: Use custom job list if provided, otherwise fetch all deployable jobs
+        const jobsToRelease = jobs && jobs.length > 0 ? jobs : getDeployableJobs();
         if (jobsToRelease.length === 0) {
             throw new Error('No deployable jobs found in jobs.yaml');
         }

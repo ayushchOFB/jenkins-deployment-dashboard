@@ -27,7 +27,7 @@ router.post('/trigger', async (req, res) => {
         return res.status(409).json({ error: 'A scheduled deployment is already running' });
     }
 
-    const { branch, env } = req.body || {};
+    const { branch, env, jobs } = req.body || {};
 
     // Fire and forget — respond immediately, run in background
     res.json({
@@ -35,11 +35,13 @@ router.post('/trigger', async (req, res) => {
         message: 'Scheduled deployment triggered',
         env: env || state.config.env,
         branch: branch || state.config.branch,
+        jobs: jobs || 'all',
     });
 
     runScheduledDeployment({
         branch,
         env,
+        jobs,
         triggeredBy: 'manual',
     }).catch(err => {
         console.error(`[Scheduler] Manual trigger error: ${err.message}`);
