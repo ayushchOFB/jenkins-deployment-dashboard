@@ -164,6 +164,17 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta) {
         }
     }
 
+    // Pass any extra_params defined in jobs.yaml
+    if (meta.extra_params) {
+        meta.extra_params.each { key, value ->
+            if (value instanceof Boolean) {
+                jobParams.add(booleanParam(name: key, value: value))
+            } else {
+                jobParams.add(string(name: key, value: String.valueOf(value)))
+            }
+        }
+    }
+
     echo ">>> Triggering ${jobName} | Branch: ${branch} | Env: ${targetEnv} | Type: ${deployType ?: 'N/A'} | Domain: ${domain ?: 'N/A'}"
     
     try {

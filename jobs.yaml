@@ -8,6 +8,8 @@ jobs:
     jenkins_job: "STG-Clone-Prod-Data"
     type: "backend"
     fe_type: "none"
+    extra_params:
+      fullData: true
 
   - name: "Bheem-Compile-Deploy"
     jenkins_job: "Bheem-Compile-Deploy"

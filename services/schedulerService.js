@@ -187,13 +187,23 @@ const pollPipelineCompletion = async (previousBuildNumber = 0) => {
                 continue;
             }
 
-            // Build finished — extract stage results
-            const stages = (releaseStatus.stages || []).map(s => ({
-                job: s.name || 'Unknown',
-                status: normaliseStageStatus(s.status),
-                url: buildUrl,
-                durationMs: s.durationMillis || 0,
-            }));
+            // Build finished — extract stage results (only deploy stages)
+            const stages = (releaseStatus.stages || [])
+                .filter(s => {
+                    const name = s.name || '';
+                    // Only include actual deploy stages, skip pipeline overhead
+                    return name.startsWith('Deploy:');
+                })
+                .map(s => {
+                    const stageName = s.name || 'Unknown';
+                    const jobUrl = buildDownstreamJobUrl(stageName);
+                    return {
+                        job: stageName,
+                        status: normaliseStageStatus(s.status),
+                        url: jobUrl || buildUrl,
+                        durationMs: s.durationMillis || 0,
+                    };
+                });
 
             return {
                 overallStatus: releaseStatus.status,
@@ -208,6 +218,32 @@ const pollPipelineCompletion = async (previousBuildNumber = 0) => {
     }
 
     throw new Error(`Pipeline did not complete within ${timeoutMs / 60000} minutes`);
+};
+
+/**
+ * Extract Jenkins job name from stage name and build a direct URL.
+ * Stage names look like: "Deploy: OFB-Compile-Deploy", "Deploy: BUYER-FE (Website)"
+ * Maps back to jenkins_job from jobs.yaml for the correct URL.
+ */
+const buildDownstreamJobUrl = (stageName) => {
+    // "Deploy: OFB-Compile-Deploy" → "OFB-Compile-Deploy"
+    // "Deploy: BUYER-FE (Website)" → "BUYER-FE"
+    // "Deploy: Merge-FE (Web_site - ADMIN)" → "Merge-FE"
+    const match = stageName.match(/^Deploy:\s*(.+?)(?:\s*\(.*\))?$/);
+    if (!match) return null;
+
+    const displayName = match[1].trim();
+
+    // Look up jenkins_job from jobs.yaml
+    try {
+        const fileContents = fs.readFileSync('./jobs.yaml', 'utf8');
+        const data = yaml.load(fileContents);
+        const jobMeta = (data.jobs || []).find(j => j.name === displayName);
+        const jenkinsJob = jobMeta ? jobMeta.jenkins_job : displayName;
+        return `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(jenkinsJob)}/`;
+    } catch (_) {
+        return `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(displayName)}/`;
+    }
 };
 
 const normaliseStageStatus = (status) => {
