@@ -107,6 +107,7 @@ const runScheduledDeployment = async ({ branch, env, triggeredBy } = {}) => {
             branch: effectiveBranch,
             startedAt: runRecord.startedAt,
             finishedAt: runRecord.finishedAt,
+            overallStatus: runRecord.status,
             results: runRecord.results.length > 0
                 ? runRecord.results
                 : [{ job: 'Pipeline', status: runRecord.status, url: runRecord.buildUrl || '' }],

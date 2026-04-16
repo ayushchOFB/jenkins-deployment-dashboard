@@ -56,27 +56,40 @@ const sendDeploymentNotification = async (summary) => {
  * Build Google Chat message payload with structured card.
  */
 const buildChatPayload = (summary) => {
-    const { env, branch, startedAt, finishedAt, results } = summary;
+    const { env, branch, startedAt, finishedAt, results, overallStatus } = summary;
 
     const successCount = results.filter(r => r.status === 'SUCCESS').length;
-    const failedCount = results.filter(r => r.status !== 'SUCCESS').length;
+    const failedCount = results.filter(r => r.status === 'FAILED').length;
+    const abortedCount = results.filter(r => r.status === 'ABORTED').length;
     const totalCount = results.length;
 
     const duration = finishedAt && startedAt
         ? formatDuration(new Date(finishedAt) - new Date(startedAt))
         : 'N/A';
 
-    const statusIcon = failedCount === 0 ? '✅' : '⚠️';
-    const headerText = `${statusIcon} Deployment Summary — ${env.toUpperCase()} (${formatTime(startedAt)})`;
+    // Header icon based on overall pipeline status
+    let statusIcon = '✅';
+    if (overallStatus === 'ABORTED') statusIcon = '🚫';
+    else if (overallStatus === 'FAILED' || overallStatus === 'ERROR') statusIcon = '❌';
+    else if (failedCount > 0 || abortedCount > 0) statusIcon = '⚠️';
 
-    // Build per-job lines
+    const headerText = `${statusIcon} Deployment Summary — ${env.toUpperCase()} (${formatTime(startedAt)}) — ${overallStatus || 'UNKNOWN'}`;
+
+    // Build per-job lines with distinct icons per status
     const jobLines = results.map(r => {
-        const icon = r.status === 'SUCCESS' ? '✔️' : '✖️';
+        let icon = '✔️';
+        if (r.status === 'FAILED') icon = '✖️';
+        else if (r.status === 'ABORTED') icon = '🚫';
+        else if (r.status === 'SKIPPED' || r.status === 'NOT_EXECUTED') icon = '⏭️';
+        else if (r.status !== 'SUCCESS') icon = '❓';
         const link = r.url ? `<${r.url}|View Build>` : 'No link';
         return `${icon}  *${r.job}* — ${r.status} — ${link}`;
     }).join('\n');
 
-    const statsLine = `*${successCount}/${totalCount} succeeded* | ${failedCount} failed | Branch: \`${branch}\` | Duration: ${duration}`;
+    let statsLine = `*${successCount}/${totalCount} succeeded*`;
+    if (failedCount > 0) statsLine += ` | ${failedCount} failed`;
+    if (abortedCount > 0) statsLine += ` | ${abortedCount} aborted`;
+    statsLine += ` | Branch: \`${branch}\` | Duration: ${duration}`;
 
     // Google Chat simple text message (works with all webhook types)
     return {
