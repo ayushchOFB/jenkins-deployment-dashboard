@@ -146,8 +146,9 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta) {
         finalEnvValue = "ofb_" + targetEnv
     }
     
+    def targetBranch = meta.branch ?: branch
     def jobParams = [
-        string(name: branchParamName, value: branch),
+        string(name: branchParamName, value: targetBranch),
         string(name: 'Env', value: finalEnvValue)
     ]
     
@@ -175,7 +176,7 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta) {
         }
     }
 
-    echo ">>> Triggering ${jobName} | Branch: ${branch} | Env: ${targetEnv} | Type: ${deployType ?: 'N/A'} | Domain: ${domain ?: 'N/A'}"
+    echo ">>> Triggering ${jobName} | Branch: ${targetBranch} | Env: ${targetEnv} | Type: ${deployType ?: 'N/A'} | Domain: ${domain ?: 'N/A'}"
     
     try {
         if (dryExecution) {
@@ -197,7 +198,7 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta) {
     
     results.add([
         name: displayName,
-        branch: branch,
+        branch: targetBranch,
         type: deployType ?: "-",
         domain: domain ?: "-",
         status: status,

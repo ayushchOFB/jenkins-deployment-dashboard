@@ -15,6 +15,7 @@ jobs:
     jenkins_job: "Bheem-Compile-Deploy"
     type: "backend"
     fe_type: "none"
+    branch: "main"
 
   - name: "Deploy-Libs"
     jenkins_job: "Deploy-Libs"

@@ -75,16 +75,43 @@ const buildChatPayload = (summary) => {
 
     const headerText = `${statusIcon} Deployment Summary — ${env.toUpperCase()} (${formatTime(startedAt)}) — ${overallStatus || 'UNKNOWN'}`;
 
-    // Build per-job lines with distinct icons per status
-    const jobLines = results.map(r => {
-        let icon = '✔️';
-        if (r.status === 'FAILED') icon = '✖️';
-        else if (r.status === 'ABORTED') icon = '🚫';
-        else if (r.status === 'SKIPPED' || r.status === 'NOT_EXECUTED') icon = '⏭️';
-        else if (r.status !== 'SUCCESS') icon = '❓';
+    const getIcon = (status) => {
+        if (status === 'FAILED' || status === 'ERROR') return '✖️';
+        if (status === 'ABORTED') return '🚫';
+        if (status === 'SKIPPED' || status === 'NOT_EXECUTED') return '⏭️';
+        if (status === 'SUCCESS') return '✔️';
+        return '❓';
+    };
+
+    const formatJobLine = (r) => {
         const link = r.url ? `<${r.url}|View Build>` : 'No link';
-        return `${icon}  *${r.job}* — ${r.status} — ${link}`;
-    }).join('\n');
+        return `${getIcon(r.status)}  *${r.job}* — ${r.status} — ${link}`;
+    };
+
+    const failedJobs = results.filter(r => r.status === 'FAILED' || r.status === 'ERROR');
+    const abortedJobs = results.filter(r => r.status === 'ABORTED');
+    const passedJobs = results.filter(r => r.status === 'SUCCESS');
+    const otherJobs = results.filter(r => !['SUCCESS', 'FAILED', 'ERROR', 'ABORTED'].includes(r.status));
+
+    const sections = [];
+    
+    if (failedJobs.length > 0) {
+        sections.push(`*🚨 FAILED JOBS (${failedJobs.length})*\n` + failedJobs.map(formatJobLine).join('\n'));
+    }
+    
+    if (abortedJobs.length > 0) {
+        sections.push(`*🚫 ABORTED JOBS (${abortedJobs.length})*\n` + abortedJobs.map(formatJobLine).join('\n'));
+    }
+    
+    if (otherJobs.length > 0) {
+        sections.push(`*⏭️ OTHER (${otherJobs.length})*\n` + otherJobs.map(formatJobLine).join('\n'));
+    }
+
+    if (passedJobs.length > 0) {
+        sections.push(`*✅ PASSED JOBS (${passedJobs.length})*\n` + passedJobs.map(formatJobLine).join('\n'));
+    }
+
+    const jobLines = sections.join('\n\n');
 
     let statsLine = `*${successCount}/${totalCount} succeeded*`;
     if (failedCount > 0) statsLine += ` | ${failedCount} failed`;
