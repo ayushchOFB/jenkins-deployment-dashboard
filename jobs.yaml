@@ -105,6 +105,7 @@ jobs:
     jenkins_job: "Informer-Deploy"
     type: "backend"
     fe_type: "none"
+    env_prefix: "ofb_"
 
   - name: "Notification-Compile"
     jenkins_job: "Notification-Compile"
@@ -127,21 +128,25 @@ jobs:
     jenkins_job: "OFB-FS-Compile"
     type: "backend"
     fe_type: "none"
+    env_prefix: "ofb_"
 
   - name: "OFB-FS-Deploy"
     jenkins_job: "OFB-FS-Deploy"
     type: "backend"
     fe_type: "none"
+    env_prefix: "ofb_"
 
   - name: "OFB-Scheduler-Compile"
     jenkins_job: "OFB-Scheduler-Compile"
     type: "backend"
     fe_type: "none"
+    env_prefix: "ofb_"
 
   - name: "OFB-Scheduler-Deploy"
     jenkins_job: "OFB-Scheduler-Deploy"
     type: "backend"
     fe_type: "none"
+    env_prefix: "ofb_"
 
   # --- Group 2: Frontend ---
   - name: "BUYER-FE"
@@ -154,19 +159,20 @@ jobs:
     type: "frontend"
     fe_type: "special"
     runs:
-      - deploy_type: "Web_site"
+      - deploy_type: "WEB_SITE"
         domain: "ADMIN"
-      - deploy_type: "M_site"
+      - deploy_type: "M_SITE"
         domain: "ADMIN"
-      - deploy_type: "Web_site"
+      - deploy_type: "WEB_SITE"
         domain: "BUYER"
-      - deploy_type: "M_site"
+      - deploy_type: "M_SITE"
         domain: "BUYER"
 
   - name: "OASYS-FE"
     jenkins_job: "OASYS-FE"
     type: "frontend"
     fe_type: "standard"
+    env_prefix: "ofb_"
 
   - name: "OASYS-TS"
     jenkins_job: "OASYS-TS"
@@ -178,6 +184,7 @@ jobs:
     jenkins_job: "OfB-Admin"
     type: "frontend"
     fe_type: "none"
+    env_prefix: "ofb_"
 
   - name: "Orion-Admin"
     jenkins_job: "Orion-Admin"

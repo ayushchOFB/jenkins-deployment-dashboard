@@ -93,10 +93,10 @@ pipeline {
 
                         if (jobMeta.fe_type == 'standard') {
                             stage("Deploy: ${jobDisplayName} (Website)") {
-                                executeJob(jobDisplayName, jenkinsJobName, branchToUse, 'website', null, jobMeta)
+                                executeJob(jobDisplayName, jenkinsJobName, branchToUse, 'WEB_SITE', null, jobMeta)
                             }
                             stage("Deploy: ${jobDisplayName} (MSite)") {
-                                executeJob(jobDisplayName, jenkinsJobName, branchToUse, 'msite', null, jobMeta)
+                                executeJob(jobDisplayName, jenkinsJobName, branchToUse, 'M_SITE', null, jobMeta)
                             }
                         } else if (jobMeta.fe_type == 'special') {
                             jobMeta.runs.each { run ->
@@ -136,24 +136,23 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta) {
     def branchParamName = meta.branch_param ?: (jobName == 'Deploy-Libs') ? 'branch_to_deploy' : 
                          (jobName == 'Merge-FE') ? 'branchName' : 'branchName'
     
-    def deployTypeParamName = (jobName == 'Merge-FE') ? 'Platform' : 'DEPLOY_TYPE'
+    def deployTypeParamName = (meta.type == 'frontend' || jobName == 'Merge-FE') ? 'Platform' : 'DEPLOY_TYPE'
     def domainParamName     = (jobName == 'Merge-FE') ? 'Domain' : 'DOMAIN'
     
-    def finalEnvValue = targetEnv
+    def finalEnvValue = "ofb_" + targetEnv
     if (meta.env_prefix) {
         finalEnvValue = meta.env_prefix + targetEnv
-    } else if (jobName == 'OASYS-TS') {
-        finalEnvValue = "ofb_" + targetEnv
     }
     
     def targetBranch = meta.branch ?: branch
     def jobParams = [
-        string(name: branchParamName, value: targetBranch),
-        string(name: 'Env', value: finalEnvValue)
+        string(name: branchParamName, value: targetBranch)
     ]
     
     if (deployType) jobParams.add(string(name: deployTypeParamName, value: deployType))
     if (domain) jobParams.add(string(name: domainParamName, value: domain))
+    jobParams.add(string(name: 'Env', value: finalEnvValue))
+    
     if (jobName == 'Merge-FE') {
         jobParams.add(string(name: 'SubDomain', value: 'OFB'))
     }
