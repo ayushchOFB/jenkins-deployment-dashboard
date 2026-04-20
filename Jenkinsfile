@@ -49,7 +49,8 @@ pipeline {
                     release_jobs_list = rawJobs.split(/[,\n]/).collect { it.trim() }.findAll { it }
                     echo "FINAL Jobs selected for release: ${release_jobs_list}"
                     
-                    results = [] 
+                    results = []
+                    postCloneStatus = 'NOT_RUN'
                 }
             }
         }
@@ -110,6 +111,38 @@ pipeline {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        stage('Post Execution / Post Clone') {
+            steps {
+                script {
+                    def uat1Host = '10.22.0.131'
+                    def sshUser = 'root'
+                    def startTime = System.currentTimeMillis()
+
+                    echo "--- Running Post Clone Script on ${uat1Host} ---"
+                    try {
+                        sh """
+                            scp -o StrictHostKeyChecking=no postClone.sh ${sshUser}@${uat1Host}:/tmp/postClone.sh
+                            ssh -o StrictHostKeyChecking=no ${sshUser}@${uat1Host} 'chmod +x /tmp/postClone.sh && /tmp/postClone.sh'
+                        """
+                        postCloneStatus = 'SUCCESS'
+                    } catch (Exception e) {
+                        echo "Post Clone failed: ${e.message}"
+                        postCloneStatus = 'FAILED'
+                    }
+
+                    def durationStr = formatDuration(System.currentTimeMillis() - startTime)
+                    results.add([
+                        name: 'Post Clone (uat1)',
+                        branch: '-',
+                        type: '-',
+                        domain: '-',
+                        status: postCloneStatus,
+                        duration: durationStr
+                    ])
                 }
             }
         }
