@@ -61,11 +61,19 @@ pipeline {
                     def branchToUse = env.RELEASE_BRANCH ?: params.RELEASE_BRANCH ?: "main"
                     def libsToDeploy = env.LIBS_TO_DEPLOY ?: params.LIBS_TO_DEPLOY ?: ""
                     
-                    // --- STEP 1: Deploy Libraries First ---
+                    // --- STEP 1: Deploy Libraries First (one trigger per library) ---
                     def libJobMeta = dest_jobs.find { it.name == 'Deploy-Libs' }
                     if (libJobMeta && (release_jobs_list.contains('Deploy-Libs') || libsToDeploy)) {
                         echo "--- Phase 1: Deploying Libraries ---"
-                        executeJob(libJobMeta.name, libJobMeta.jenkins_job, branchToUse, null, null, libJobMeta)
+                        def libsList = libsToDeploy.split(',').collect { it.trim() }.findAll { it }
+                        if (libsList.size() > 0) {
+                            libsList.each { singleLib ->
+                                echo "Deploying library: ${singleLib}"
+                                executeJob("Deploy-Libs (${singleLib})", libJobMeta.jenkins_job, branchToUse, null, null, libJobMeta, singleLib)
+                            }
+                        } else {
+                            echo "No libraries specified, skipping Deploy-Libs"
+                        }
                     }
 
                     // --- STEP 2: Deploy Remaining Services ---
@@ -160,14 +168,13 @@ pipeline {
 /**
  * Executes a Jenkins job with parameters and tracks results.
  */
-def executeJob(displayName, jobName, branch, deployType, domain, meta) {
+def executeJob(displayName, jobName, branch, deployType, domain, meta, singleLib = null) {
     def startTime = System.currentTimeMillis()
     def status = "SUCCESS"
     def targetEnv = params.STG_ENV ?: "stg1"
     def dryExecution = (params.DRY_RUN == true || params.DR_RUN == true)
     
-    def branchParamName = meta.branch_param ?: (jobName == 'Deploy-Libs') ? 'branch_to_deploy' : 
-                         (jobName == 'Merge-FE') ? 'branchName' : 'branchName'
+    def branchParamName = meta.branch_param ?: ((jobName == 'Deploy-Libs') ? 'branch_to_deploy' : 'branchName')
     
     def deployTypeParamName = (meta.type == 'frontend' || jobName == 'Merge-FE') ? 'Platform' : 'DEPLOY_TYPE'
     def domainParamName     = (jobName == 'Merge-FE') ? 'Domain' : 'DOMAIN'
@@ -190,11 +197,9 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta) {
         jobParams.add(string(name: 'SubDomain', value: 'OFB'))
     }
     
-    if (meta.has_libs_param) {
-        def libsToDeploy = env.LIBS_TO_DEPLOY ?: params.LIBS_TO_DEPLOY ?: ""
-        if (libsToDeploy) {
-            jobParams.add(text(name: 'library_to_deploy', value: libsToDeploy))
-        }
+    // Deploy-Libs: pass single library as Choice-compatible value
+    if (meta.has_libs_param && singleLib) {
+        jobParams.add(string(name: 'library_to_deploy', value: singleLib))
     }
 
     // Pass any extra_params defined in jobs.yaml

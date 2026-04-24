@@ -153,6 +153,7 @@ jobs:
     jenkins_job: "BUYER-FE"
     type: "frontend"
     fe_type: "standard"
+    branch_param: "branch"
 
   - name: "Merge-FE"
     jenkins_job: "Merge-FE"
