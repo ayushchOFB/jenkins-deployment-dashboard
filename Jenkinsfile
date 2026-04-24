@@ -184,7 +184,12 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta, singleLib
         finalEnvValue = meta.env_prefix + targetEnv
     }
     
-    def targetBranch = meta.branch ?: branch
+    // If user passes 'master' or 'main' (default deploy), respect the job's default_branch if set
+    // (e.g. Bheem uses 'main' while others use 'master'). For release branches, pass through as-is.
+    def targetBranch = branch
+    if (meta.default_branch && (branch == 'master' || branch == 'main')) {
+        targetBranch = meta.default_branch
+    }
     def jobParams = [
         string(name: branchParamName, value: targetBranch)
     ]
