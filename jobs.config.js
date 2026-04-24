@@ -20,6 +20,7 @@ module.exports = {
     // Jobs to track — add or remove job names here freely
     JOBS: [
         'STG-Clone-Prod-Data',
+        'Bheem-Compile-Deploy',
         'OFB-Compile-Deploy',
         'OASYS-FE',
         'OASYS-TS',
@@ -34,7 +35,10 @@ module.exports = {
         'Orion-Compile-Deploy',
         'Orion-FS-Compile',
         'Orion-FS-Deploy',
+        'Orion-Scheduler-Compile',
         'Orion-Scheduler-Deploy',
+        'Orion-Admin',
+        'Orion-FE',
         'OFB-FS-Compile',
         'OFB-FS-Deploy',
         'Supplier-FE',
