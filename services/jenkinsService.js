@@ -149,6 +149,16 @@ const jenkinsGet = async (url) => {
     return res.json();
 };
 
+const jenkinsGetText = async (url) => {
+    const res = await fetch(url, {
+        headers: { ...getAuthHeader() },
+        timeout: 14000,
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+    return res.text();
+};
+
 /**
  * For a single job: fetch the last SCAN_DEPTH builds and return the
  * most-recent build per environment.
@@ -197,6 +207,7 @@ const fetchJobEnvMap = async (jobName) => {
  * Fetch all configured jobs in parallel.
  * Returns a flat array of deployments — one record per (job × environment).
  * If a job has no env params at all, one record is emitted for its latest build.
+ * For deploy-only jobs, the branch is fetched from the build's console log if missing.
  */
 const fetchAllDeployments = async () => {
     const results = await Promise.all(config.JOBS.map(fetchJobEnvMap));
@@ -207,9 +218,40 @@ const fetchAllDeployments = async () => {
         if (envKeys.length > 0) {
             envKeys.forEach(k => flat.push(envMap[k]));
         } else if (lastBuild) {
-            flat.push(lastBuild);     // job shows up even without env params
+            flat.push(lastBuild);
         }
     }
+
+    // Concurrently fetch console logs to extract branch names for deploy jobs
+    const logBranchJobs = new Set(config.LOG_BRANCH_JOBS || []);
+    const logFetchPromises = flat.map(async (entry) => {
+        const isMissingOrHash = !entry.branch || entry.branch === '—' || /^[0-9a-f]{40}$/i.test(entry.branch);
+        
+        if (logBranchJobs.has(entry.job) && isMissingOrHash) {
+            try {
+                const url = `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(entry.job)}/${entry.buildNumber}/consoleText`;
+                const text = await jenkinsGetText(url);
+                if (text) {
+                    const match1 = text.match(/branchName=(?:origin\/)?(\S+)/);
+                    const match2 = text.match(/git\.branch with value (?:origin\/)?(\S+)/);
+                    const match3 = text.match(/\bbranch=(?:origin\/)?(\S+)/);
+                    
+                    if (match1 && !match1[1].startsWith('$')) {
+                        entry.branch = match1[1];
+                    } else if (match2 && !match2[1].startsWith('$')) {
+                        entry.branch = match2[1];
+                    } else if (match3 && !match3[1].startsWith('$')) {
+                        entry.branch = match3[1];
+                    }
+                }
+            } catch (err) {
+                console.error(`[Jenkins] Failed to fetch log for branch on ${entry.job}#${entry.buildNumber}: ${err.message}`);
+            }
+        }
+    });
+
+    await Promise.all(logFetchPromises);
+
     return flat;
 };
 
