@@ -111,7 +111,9 @@ const applyFilters = (data) => {
 const getVisibleDeployments = () => {
     let data = allDeployments;
     if (activeEnv !== 'all') {
-        data = data.filter(d => d.environment === activeEnv);
+        // Include jobs matching the selected env AND jobs with no env param
+        // (compile-only jobs like Informer-Compile, OFB-Scheduler-Compile, etc.)
+        data = data.filter(d => d.environment === activeEnv || d.environment === '—');
     }
     return applyFilters(data);
 };
@@ -144,13 +146,54 @@ const renderTabs = () => {
     }).join('');
 };
 
+/** Render a standard table row */
+const renderRow = (d) => {
+    const [ca, cb] = jobColors(d.job);
+    const ini = initials(d.job);
+    const userIni = initials(d.deployedBy !== '—' ? d.deployedBy : '??');
+    const jenUrl = esc(d.url || '#');
+    const userDisplay = d.deployedBy !== '—' ? d.deployedBy.split('@')[0] : '—';
+
+    return `<tr>
+        <td>
+            <div class="job-cell">
+                <div class="job-avatar" style="--job-c-a:${ca};--job-c-b:${cb}">${ini}</div>
+                <div>
+                    <a href="${jenUrl}" target="_blank" class="job-name-link">${esc(d.job)}</a>
+                    ${d.environment !== '—' ? `<div class="job-sub">${esc(d.environment.toUpperCase())}</div>` : ''}
+                </div>
+            </div>
+        </td>
+        <td>
+            ${d.branch !== '—'
+            ? `<span class="branch-tag"><span class="branch-icon">⎇</span>${esc(d.branch)}</span>`
+            : '<span style="color:var(--text-muted)">—</span>'}
+        </td>
+        <td class="build-num">${d.buildNumber !== null ? `#${esc(String(d.buildNumber))}` : '—'}</td>
+        <td>
+            <div class="sp sp-${esc(d.status)}">
+                <div class="dot"></div>${esc(statusLabel(d.status))}
+            </div>
+        </td>
+        <td>
+            ${userDisplay !== '—'
+            ? `<div class="user-cell">
+                     <div class="user-avatar">${userIni}</div>
+                     <span class="user-name" title="${esc(d.deployedBy)}">${esc(userDisplay)}</span>
+                   </div>`
+            : '<span style="color:var(--text-muted)">—</span>'}
+        </td>
+        <td class="time-cell" title="${esc(fmtFull(d.timestamp))}">${relTime(d.timestamp)}</td>
+        <td><button class="btn-hist" onclick="openHistory('${esc(d.job)}')">History</button></td>
+    </tr>`;
+};
+
 const renderTable = () => {
     const data = getVisibleDeployments();
     const wrap = $('tableWrap');
     const empty = $('emptyState');
     const noEnv = $('noEnvJobs');
 
-    // Show/hide states
     $('loadingState').classList.add('hidden');
     noEnv.classList.add('hidden');
     empty.classList.add('hidden');
@@ -167,52 +210,9 @@ const renderTable = () => {
     }
 
     wrap.classList.remove('hidden');
-    $('tableBody').innerHTML = data.map(d => {
-        const [ca, cb] = jobColors(d.job);
-        const ini = initials(d.job);
-        const userIni = initials(d.deployedBy !== '—' ? d.deployedBy : '??');
-        const jenUrl = esc(d.url || '#');
 
-        // Shorten email deployedBy → first part before @
-        const userDisplay = d.deployedBy !== '—'
-            ? d.deployedBy.split('@')[0]
-            : '—';
+    $('tableBody').innerHTML = data.map(d => renderRow(d)).join('');
 
-        return `<tr>
-            <td>
-                <div class="job-cell">
-                    <div class="job-avatar" style="--job-c-a:${ca};--job-c-b:${cb}">${ini}</div>
-                    <div>
-                        <a href="${jenUrl}" target="_blank" class="job-name-link">${esc(d.job)}</a>
-                        ${d.environment !== '—' ? `<div class="job-sub">${esc(d.environment.toUpperCase())}</div>` : ''}
-                    </div>
-                </div>
-            </td>
-            <td>
-                ${d.branch !== '—'
-                ? `<span class="branch-tag"><span class="branch-icon">⎇</span>${esc(d.branch)}</span>`
-                : '<span style="color:var(--text-muted)">—</span>'}
-            </td>
-            <td class="build-num">${d.buildNumber !== null ? `#${esc(String(d.buildNumber))}` : '—'}</td>
-            <td>
-                <div class="sp sp-${esc(d.status)}">
-                    <div class="dot"></div>${esc(statusLabel(d.status))}
-                </div>
-            </td>
-            <td>
-                ${userDisplay !== '—'
-                ? `<div class="user-cell">
-                         <div class="user-avatar">${userIni}</div>
-                         <span class="user-name" title="${esc(d.deployedBy)}">${esc(userDisplay)}</span>
-                       </div>`
-                : '<span style="color:var(--text-muted)">—</span>'}
-            </td>
-            <td class="time-cell" title="${esc(fmtFull(d.timestamp))}">${relTime(d.timestamp)}</td>
-            <td><button class="btn-hist" onclick="openHistory('${esc(d.job)}')">History</button></td>
-        </tr>`;
-    }).join('');
-
-    // Update "last updated" footer time
     $('lastUpdateText').textContent = 'Just now';
 };
 
@@ -519,7 +519,7 @@ const updateThemeIcon = (theme) => {
 const RM_MANIFEST = [
     {
         category: 'Backend Services',
-        jobs: ['Bheem-Compile-Deploy', 'Deploy-Libs', 'Informer-Compile', 'Informer-Deploy', 'Notification-Compile', 'Notification-Deploy', 'OFB-Compile', 'OFB-Compile-Deploy', 'OFB-Deploy', 'OFB-FS-Compile', 'OFB-FS-Deploy', 'OFB-Scheduler-Compile', 'OFB-Scheduler-Deploy']
+        jobs: ['Bheem-Compile-Deploy', 'Bheem-Redis-Clone', 'Deploy-Libs', 'Informer-Compile', 'Informer-Deploy', 'Notification-Compile', 'Notification-Deploy', 'OFB-Compile', 'OFB-Compile-Deploy', 'OFB-Deploy', 'OFB-FS-Compile', 'OFB-FS-Deploy', 'OFB-Scheduler-Compile', 'OFB-Scheduler-Deploy']
     },
     {
         category: 'Frontend Apps',

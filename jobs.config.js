@@ -20,29 +20,35 @@ module.exports = {
     // Jobs to track — add or remove job names here freely
     JOBS: [
         'STG-Clone-Prod-Data',
+        'Bheem-Redis-Clone',
         'Bheem-Compile-Deploy',
         'OFB-Compile-Deploy',
         'OASYS-FE',
         'OASYS-TS',
         'OFB-ADMIN',
         'MERGE-FE',
-        'Informer-Compile',
         'Informer-Deploy',
-        'OFB-Scheduler-Compile',
         'OFB-Scheduler-Deploy',
-        'Notification-Compile',
         'Notification-Deploy',
         'Orion-Compile-Deploy',
-        'Orion-FS-Compile',
         'Orion-FS-Deploy',
-        'Orion-Scheduler-Compile',
         'Orion-Scheduler-Deploy',
         'Orion-Admin',
         'Orion-FE',
-        'OFB-FS-Compile',
         'OFB-FS-Deploy',
         'Supplier-FE',
         'BUYER-FE',
+    ],
+
+    // Deploy jobs that don't have branch parameters in their API.
+    // The backend will fetch their console logs and extract the branch name.
+    LOG_BRANCH_JOBS: [
+        'Informer-Deploy',
+        'OFB-Scheduler-Deploy',
+        'Notification-Deploy',
+        'Orion-FS-Deploy',
+        'Orion-Scheduler-Deploy',
+        'OFB-FS-Deploy',
     ],
 
     // Build parameter names your Jenkins jobs use to pass the target environment.
