@@ -11,6 +11,12 @@ jobs:
     extra_params:
       fullData: true
 
+  - name: "Bheem-Redis-Clone"
+    jenkins_job: "Bheem-Redis-Clone"
+    type: "backend"
+    fe_type: "none"
+    no_params: true
+
   - name: "Bheem-Compile-Deploy"
     jenkins_job: "Bheem-Compile-Deploy"
     type: "backend"

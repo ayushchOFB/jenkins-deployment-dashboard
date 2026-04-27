@@ -100,7 +100,11 @@ pipeline {
                         
                         echo "Processing Job: ${jobDisplayName} (Branch: ${branchToUse})"
 
-                        if (jobMeta.fe_type == 'standard') {
+                        if (jobMeta.no_params) {
+                            stage("Deploy: ${jobDisplayName}") {
+                                executeNoParamJob(jobDisplayName, jenkinsJobName)
+                            }
+                        } else if (jobMeta.fe_type == 'standard') {
                             stage("Deploy: ${jobDisplayName} (Website)") {
                                 executeJob(jobDisplayName, jenkinsJobName, branchToUse, 'WEB_SITE', null, jobMeta)
                             }
@@ -243,6 +247,43 @@ def executeJob(displayName, jobName, branch, deployType, domain, meta, singleLib
         branch: targetBranch,
         type: deployType ?: "-",
         domain: domain ?: "-",
+        status: status,
+        duration: durationStr
+    ])
+}
+
+/**
+ * Executes a Jenkins job that takes NO parameters (e.g. Bheem-Redis-Clone).
+ */
+def executeNoParamJob(displayName, jobName) {
+    def startTime = System.currentTimeMillis()
+    def status = "SUCCESS"
+    def dryExecution = (params.DRY_RUN == true || params.DR_RUN == true)
+
+    echo ">>> Triggering ${jobName} (no parameters)"
+
+    try {
+        if (dryExecution) {
+            echo "[DRY RUN] Would trigger ${jobName} with no params"
+            sleep 1
+        } else {
+            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                def jobBuild = build job: jobName, wait: true, propagate: false
+                status = jobBuild.result
+            }
+        }
+    } catch (Exception e) {
+        echo "Error triggering job ${jobName}: ${e.message}"
+        status = "FAILED"
+    }
+
+    def durationStr = formatDuration(System.currentTimeMillis() - startTime)
+
+    results.add([
+        name: displayName,
+        branch: '-',
+        type: '-',
+        domain: '-',
         status: status,
         duration: durationStr
     ])
