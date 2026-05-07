@@ -274,6 +274,33 @@ const normaliseStageStatus = (status) => {
     return s;
 };
 
+// ── Holiday / Off-day Skip Logic ─────────────────────────────────────────────
+
+/**
+ * Check if today should be skipped (no deployment).
+ * Skips: All Sundays, 2nd Saturday, 4th Saturday of the month.
+ */
+const shouldSkipToday = () => {
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const dayOfWeek = now.getDay();   // 0 = Sunday, 6 = Saturday
+    const dayOfMonth = now.getDate();
+
+    // Skip all Sundays
+    if (dayOfWeek === 0) {
+        return { skip: true, reason: 'Sunday' };
+    }
+
+    // Skip 2nd and 4th Saturdays
+    if (dayOfWeek === 6) {
+        const nthOccurrence = Math.ceil(dayOfMonth / 7); // 1st, 2nd, 3rd, 4th, 5th
+        if (nthOccurrence === 2 || nthOccurrence === 4) {
+            return { skip: true, reason: `${nthOccurrence}nd/4th Saturday` };
+        }
+    }
+
+    return { skip: false };
+};
+
 // ── Cron Setup ───────────────────────────────────────────────────────────────
 
 let cronTask = null;
@@ -291,6 +318,14 @@ const initScheduler = () => {
 
     cronTask = cron.schedule(schedulerConfig.CRON_SCHEDULE, () => {
         console.log(`[Scheduler] Cron fired at ${new Date().toISOString()}`);
+
+        // Skip Sundays and 2nd/4th Saturdays
+        const { skip, reason } = shouldSkipToday();
+        if (skip) {
+            console.log(`[Scheduler] Skipping today — ${reason} (no deployment)`);
+            return;
+        }
+
         runScheduledDeployment().catch(err => {
             console.error(`[Scheduler] Unhandled error in scheduled run: ${err.message}`);
         });
