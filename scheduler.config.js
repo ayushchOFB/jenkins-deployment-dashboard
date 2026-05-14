@@ -33,4 +33,23 @@ module.exports = {
 
     // Enable/disable scheduler (set SCHEDULER_ENABLED=false to disable)
     ENABLED: process.env.SCHEDULER_ENABLED !== 'false',
+
+    // ── Post-deploy Sanity Suite (DevTest) ───────────────────────────────────
+    // Triggered 30 min after the 8 AM pipeline finishes — only when overall
+    // status is SUCCESS. Skipped on any failure/abort.
+    SANITY: {
+        ENABLED: process.env.SANITY_ENABLED !== 'false',
+        JOB: 'Sanity-Suite-OFB',
+        DELAY_MS: 30 * 60 * 1000,
+        PARAMS: {
+            branchName: 'master',
+            env_platform: 'STAGING',
+            env: 'ofb_uat1',
+            test_type: 'CUSTOM_OASYS',
+            tests: 'DevTest',
+            eInvoiceEnable: 'false',
+            pmWorkspace: 'prod',
+            EvnVariables: '{}',
+        },
+    },
 };
