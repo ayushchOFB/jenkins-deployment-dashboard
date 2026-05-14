@@ -146,6 +146,18 @@ pipeline {
                         postCloneStatus = 'FAILED'
                     }
 
+                    // Pull the per-step summary back from uat1 (script writes it
+                    // even on partial failure) and archive as a build artifact
+                    // so the dashboard can post a per-step Gchat notification.
+                    try {
+                        sh """
+                            scp -o StrictHostKeyChecking=no ${sshUser}@${uat1Host}:/tmp/postClone-summary.json postClone-summary.json || echo '[]' > postClone-summary.json
+                        """
+                        archiveArtifacts artifacts: 'postClone-summary.json', allowEmptyArchive: true, onlyIfSuccessful: false
+                    } catch (Exception e) {
+                        echo "Could not fetch postClone-summary.json: ${e.message}"
+                    }
+
                     def durationStr = formatDuration(System.currentTimeMillis() - startTime)
                     results.add([
                         name: 'Post Clone (uat1)',
