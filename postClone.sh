@@ -1,11 +1,69 @@
 #!/bin/bash
-#postClone
+#postClone — runs after a uat1 deployment. Each step's status is recorded
+# and emitted to /tmp/postClone-summary.json so the dashboard/Gchat can
+# show per-step pass/fail (instead of one big SUCCESS/FAILED for the whole
+# script).
+
+SUMMARY_FILE="/tmp/postClone-summary.json"
+STEP_NAMES=()
+STEP_STATUSES=()
+STEP_ERRORS=()
+STEP_DURATIONS=()
+HAS_FAILURE=0
+
+# Portable millisecond timestamp — GNU date (%N) on Linux, perl fallback
+# on BSD/macOS. Returns integer ms since epoch.
+now_ms() {
+    local v
+    v=$(date +%s%3N 2>/dev/null)
+    if [[ "$v" =~ ^[0-9]+$ ]]; then echo "$v"; return; fi
+    perl -MTime::HiRes=time -e 'printf("%d\n", time()*1000)' 2>/dev/null && return
+    echo "$(($(date +%s) * 1000))"
+}
+
+# Run a step: name, then command. Captures status + duration + error msg.
+run_step() {
+    local name="$1"; shift
+    local start_ms end_ms dur_ms tmp_err status err_msg
+    echo ""
+    echo "──[ STEP: ${name} ]────────────────────────────"
+    start_ms=$(now_ms)
+    tmp_err=$(mktemp)
+    if "$@" 2> >(tee "$tmp_err" >&2); then
+        status="SUCCESS"; err_msg=""
+    else
+        status="FAILED"; HAS_FAILURE=1
+        err_msg=$(tail -c 500 "$tmp_err" | tr '\n' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/ /g')
+    fi
+    rm -f "$tmp_err"
+    end_ms=$(now_ms)
+    dur_ms=$((end_ms - start_ms))
+    STEP_NAMES+=("$name")
+    STEP_STATUSES+=("$status")
+    STEP_ERRORS+=("$err_msg")
+    STEP_DURATIONS+=("$dur_ms")
+    echo "──[ ${name}: ${status} (${dur_ms}ms) ]────────"
+}
+
+write_summary() {
+    local i n=${#STEP_NAMES[@]}
+    {
+        echo "["
+        for ((i = 0; i < n; i++)); do
+            local sep=","
+            [ $i -eq $((n - 1)) ] && sep=""
+            printf '  {"name":"%s","status":"%s","durationMs":%s,"error":"%s"}%s\n' \
+                "${STEP_NAMES[$i]}" "${STEP_STATUSES[$i]}" "${STEP_DURATIONS[$i]}" "${STEP_ERRORS[$i]}" "$sep"
+        done
+        echo "]"
+    } > "$SUMMARY_FILE"
+    echo "Summary written to ${SUMMARY_FILE}"
+}
 
 # -------------------------
 # Display summary of emails and mobiles
 # -------------------------
 
-# Define common variables
 EMAILS=("priyanshugoel@gmail.com" "priyanshu.goel@ofbusiness.in" "ayush.chaudhary@ofbusiness.in"
         "ankit.gupta@ofbusiness.in" "rankit.dalal@ofbusiness.in"
         "tushar.garg@ofbusiness.in" "shantanu.singh@ofbusiness.in")
@@ -15,206 +73,137 @@ echo -e "\nFollowing script will whitelist the following email IDs and mobile nu
 echo "Emails: ${EMAILS[*]}"
 echo "Mobiles: ${MOBILE_NUMBERS[*]}"
 
-# -------------------------
-# 0. Set Redis Key (DEVELOPER_KEY_VALUE)
-# -------------------------
-echo "Setting Redis key: DEVELOPER_KEY_VALUE=1"
-redis-cli set DEVELOPER_KEY_VALUE 1
-if [ $? -eq 0 ]; then
-    echo "Success: Redis key set"
-else
-    echo "Error: Failed to set Redis key"
-    exit 1
-fi
-
-# -------------------------
-# 0.5 Set VERIFY_LINK_MAX_RETRY_COUNT Redis Key
-# -------------------------
-echo "This is also setting VERIFY_LINK_MAX_RETRY_COUNT in Redis"
-redis-cli set VERIFY_LINK_MAX_RETRY_COUNT "3"
-if [ $? -eq 0 ]; then
-    echo "Success: Redis key VERIFY_LINK_MAX_RETRY_COUNT set to 3"
-else
-    echo "Error: Failed to set VERIFY_LINK_MAX_RETRY_COUNT"
-    exit 1
-fi
-
-# -------------------------
-# 1. Machine Name Logic
-# -------------------------
-HOSTNAME=$(cat /etc/hostname)
+# Hostname / token (used by several steps)
+HOSTNAME=$(cat /etc/hostname 2>/dev/null || echo "")
 machineName="${HOSTNAME#*-}"
 HARDCODED_TOKEN="1141828336121551101"
-
-echo -e "\nMaking testLogin request to https://${machineName}-api.ofbusiness.co.in..."
-curl --location --globoff --request POST \
-    "https://${machineName}-api.ofbusiness.co.in/api/v1/internal/testLogin/${HARDCODED_TOKEN}?key=1"
-if [ $? -eq 0 ]; then
-    echo "Success: testLogin POST request for machine ${machineName}"
-else
-    echo "Error: Failed testLogin POST request for machine ${machineName}"
-    exit 1
-fi
-
-# -------------------------
-# 2. Whitelist Logic
-# -------------------------
 BASE_URL="http://localhost:8191/api/v1/whitelist"
 TOKEN="${HARDCODED_TOKEN}"
 
-check_status() {
-    if [ $? -eq 0 ]; then
-        echo "Success: $1"
-    else
-        echo "Error: Failed to execute $1"
-        exit 1
-    fi
+# -------------------------
+# Step wrappers (one per logical operation)
+# -------------------------
+
+step_set_developer_key() {
+    redis-cli set DEVELOPER_KEY_VALUE 1
 }
 
-for EMAIL in "${EMAILS[@]}"; do
-    echo -e "\nProcessing email: $EMAIL"
-    curl -X PUT "${BASE_URL}?channels=EMAIL&email=${EMAIL}&status=true" \
-         -H "X-OFB-TOKEN:${TOKEN}"
-    check_status "EMAIL whitelist update for $EMAIL"
-done
+step_set_verify_link_retry() {
+    redis-cli set VERIFY_LINK_MAX_RETRY_COUNT "3"
+}
 
-for MOBILE in "${MOBILE_NUMBERS[@]}"; do
-    echo -e "\nProcessing mobile number: $MOBILE"
+step_test_login() {
+    [ -n "$machineName" ] || { echo "machineName empty"; return 1; }
+    curl --fail --location --globoff --request POST \
+        "https://${machineName}-api.ofbusiness.co.in/api/v1/internal/testLogin/${HARDCODED_TOKEN}?key=1"
+}
 
-    echo "Updating SMS whitelist..."
-    curl -X PUT "${BASE_URL}?channels=SMS&mobile=${MOBILE}&status=true" \
-         -H "X-OFB-TOKEN:${TOKEN}"
-    check_status "SMS whitelist update for $MOBILE"
+step_whitelist_emails() {
+    local fail=0
+    for EMAIL in "${EMAILS[@]}"; do
+        echo "Processing email: $EMAIL"
+        curl --fail -X PUT "${BASE_URL}?channels=EMAIL&email=${EMAIL}&status=true" \
+            -H "X-OFB-TOKEN:${TOKEN}" || fail=1
+    done
+    return $fail
+}
 
-    echo "Updating WHATSAPP whitelist..."
-    curl -X PUT "${BASE_URL}?channels=WHATSAPP&mobile=${MOBILE}&status=true" \
-         -H "X-OFB-TOKEN:${TOKEN}"
-    check_status "WHATSAPP whitelist update for $MOBILE"
+step_whitelist_mobiles() {
+    local fail=0
+    for MOBILE in "${MOBILE_NUMBERS[@]}"; do
+        echo "Processing mobile: $MOBILE"
+        curl --fail -X PUT "${BASE_URL}?channels=SMS&mobile=${MOBILE}&status=true"      -H "X-OFB-TOKEN:${TOKEN}" || fail=1
+        curl --fail -X PUT "${BASE_URL}?channels=WHATSAPP&mobile=${MOBILE}&status=true" -H "X-OFB-TOKEN:${TOKEN}" || fail=1
+        curl --fail -X PUT "${BASE_URL}?channels=ANDROID&mobile=${MOBILE}&status=true"  -H "X-OFB-TOKEN:${TOKEN}" || fail=1
+    done
+    return $fail
+}
 
-    echo "Updating ANDROID whitelist..."
-    curl -X PUT "${BASE_URL}?channels=ANDROID&mobile=${MOBILE}&status=true" \
-         -H "X-OFB-TOKEN:${TOKEN}"
-    check_status "ANDROID whitelist update for $MOBILE"
-done
+step_branch_deployed_ofb() {
+    local v=$(curl -s -X GET 'http://localhost:7000/status/active' | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
+    [ -n "$v" ] && echo "OFB branch: $v"
+}
 
-echo "All whitelist updates completed."
+step_branch_deployed_notification() {
+    local v=$(curl -s -X GET 'http://localhost:8191/status/detailed' -H "X-OFB-TOKEN: ${TOKEN}" \
+                | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
+    [ -n "$v" ] && echo "Notification branch: $v"
+}
+
+step_branch_deployed_fileserver() {
+    local v=$(curl -s -X GET 'http://localhost:8080/status' | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
+    [ -n "$v" ] && echo "File Server branch: $v"
+}
+
+step_branch_deployed_scheduler() {
+    local v=$(curl -s -X GET 'http://localhost:8090/status' | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
+    [ -n "$v" ] && echo "Scheduler branch: $v"
+}
+
+step_duplicate_po_fix() {
+    redis-cli HKEYS poSupplierCounter | xargs -I {} redis-cli HSET poSupplierCounter {} 1000
+}
+
+step_delete_bkalert() {
+    redis-cli del BKALERT 7166
+}
+
+step_mongo_consumer_access_key() {
+    mongosh --eval 'use informer; db.consumerAccessKey.remove({}); db.consumerAccessKey.insertOne({ host: "OFB", accessKey: "990783347078729731", active: true });'
+}
+
+step_update_user_roles() {
+    [ -n "$machineName" ] || { echo "machineName empty"; return 1; }
+    local fail=0
+    local ACCOUNT_IDS=(
+        "6238589171162681781"
+        "1141828336121551101"
+        "978054312255034071"
+        "978054650731173476"
+        "1183885017202301687"
+        "975504741243032517"
+        "1137827966831565841"
+    )
+    local ROLE_IDS='["753448627875093653","715296915872291137","6097201248748967261","1073151533970889804"]'
+    local URL="https://${machineName}-api.ofbusiness.co.in/api/v1/internal/updateroles?key=1"
+    for ACCOUNT_ID in "${ACCOUNT_IDS[@]}"; do
+        echo "Account: ${ACCOUNT_ID}"
+        curl --fail --silent --location --request POST "${URL}" \
+            --header "X-OFB-TOKEN: ${HARDCODED_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "{\"accountId\":\"${ACCOUNT_ID}\",\"roleIds\":${ROLE_IDS}}" || fail=1
+    done
+    return $fail
+}
+
+step_sunion_jvsr_companies() {
+    redis-cli SUNIONSTORE jvsrCompanyNameSpaces:ofb groupCompanyNameSpaces:ofb
+}
 
 # -------------------------
-# 3. Fetch Branch Deployed Info from http://localhost:7000/status/active
+# Execute all steps (continue on failure — summary captures each one)
 # -------------------------
-echo -e "\nFetching the branch deployed information from OFB..."
-branch_deployed_ofb=$(curl -s -X GET 'http://localhost:7000/status/active' | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
-if [ -n "$branch_deployed_ofb" ]; then
-    echo "Branch Deployed on OFB is: $branch_deployed_ofb"
-else
-    echo "Error: Failed to fetch 'branch deployed' info from OFB"
+
+run_step "Redis: DEVELOPER_KEY_VALUE"            step_set_developer_key
+run_step "Redis: VERIFY_LINK_MAX_RETRY_COUNT"    step_set_verify_link_retry
+run_step "testLogin"                              step_test_login
+run_step "Whitelist: Emails"                      step_whitelist_emails
+run_step "Whitelist: Mobiles (SMS/WA/Android)"   step_whitelist_mobiles
+run_step "Branch Deployed: OFB"                   step_branch_deployed_ofb
+run_step "Branch Deployed: Notification"          step_branch_deployed_notification
+run_step "Branch Deployed: File Server"           step_branch_deployed_fileserver
+run_step "Branch Deployed: Scheduler"             step_branch_deployed_scheduler
+run_step "Redis: poSupplierCounter -> 1000"      step_duplicate_po_fix
+run_step "Redis: del BKALERT 7166"                step_delete_bkalert
+run_step "Mongo: informer.consumerAccessKey"      step_mongo_consumer_access_key
+run_step "Update user roles"                      step_update_user_roles
+run_step "Redis: SUNIONSTORE jvsrCompanyNameSpaces:ofb" step_sunion_jvsr_companies
+
+write_summary
+
+if [ "$HAS_FAILURE" -ne 0 ]; then
+    echo -e "\nOne or more post-clone steps FAILED — see ${SUMMARY_FILE}"
     exit 1
 fi
-
-# -------------------------
-# 4. Fetch Branch Deployed Info from http://localhost:8191/status/detailed
-# -------------------------
-echo -e "\nFetching the branch deployed information from Notification..."
-branch_deployed_notification=$(curl -s -X GET 'http://localhost:8191/status/detailed' \
-     -H "X-OFB-TOKEN: ${TOKEN}" | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
-if [ -n "$branch_deployed_notification" ]; then
-    echo "Branch Deployed on Notification is: $branch_deployed_notification"
-else
-    echo "Error: Failed to fetch 'branch deployed' info from Notification"
-    exit 1
-fi
-
-
-# -------------------------
-# 5. Fetch Branch Deployed Info from http://localhost:8080/status (File Server)
-# -------------------------
-echo -e "\nFetching the branch deployed information from File Server..."
-branch_deployed_fileserver=$(curl -X GET 'http://localhost:8080/status' | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
-if [ -n "$branch_deployed_fileserver" ]; then
-    echo "Branch Deployed for File Server is: $branch_deployed_fileserver"
-else
-    echo "Error: Failed to fetch 'branch deployed' info from File Server"
-    exit 1
-fi
-
-# -------------------------
-# 6. Set Redis Values for Duplicate PO Issue
-# -------------------------
-echo -e "\nRunning command for Duplicate PO Issue..."
-redis-cli HKEYS poSupplierCounter | xargs -I {} redis-cli HSET poSupplierCounter {} 1000
-if [ $? -eq 0 ]; then
-    echo "Success: Redis keys for poSupplierCounter set to 1000"
-else
-    echo "Error: Failed to set Redis keys for poSupplierCounter"
-    exit 1
-fi
-
-# -------------------------
-# 7. Delete Redis Key (BKALERT)
-# -------------------------
-echo -e "\nDeleting key for Receipt Error..."
-redis-cli del BKALERT 7166
-if [ $? -eq 0 ]; then
-    echo "Success: Redis key BKALERT 7166 deleted"
-else
-    echo "Error: Failed to delete Redis key BKALERT 7166"
-    exit 1
-fi
-
-# -------------------------
-# 8. MongoDB Insert (consumerAccessKey into 'informer' DB)
-# -------------------------
-echo -e "\nThis is also setting access key as well"
-echo -e "\nInserting accessKey into MongoDB (DB: informer)..."
-mongosh --eval 'use informer; db.consumerAccessKey.remove({}); db.consumerAccessKey.insertOne({ host: "OFB", accessKey: "990783347078729731", active: true });'
-if [ $? -eq 0 ]; then
-    echo "Success: MongoDB insert completed"
-else
-    echo "Error: MongoDB insert failed"
-    exit 1
-fi
-
-# -------------------------
-# 9. Update User Roles for Account
-# -------------------------
-echo -e "\nUpdating user roles for the accounts..."
-
-ACCOUNT_IDS=(
-    "6238589171162681781"
-    "1141828336121551101"
-    "978054312255034071"
-    "978054650731173476"
-    "1183885017202301687"
-    "975504741243032517",
-    "1137827966831565841"
-)
-
-ROLE_IDS='["753448627875093653","715296915872291137","6097201248748967261","1073151533970889804"]'
-UPDATE_ROLES_URL="https://${machineName}-api.ofbusiness.co.in/api/v1/internal/updateroles?key=1"
-
-for ACCOUNT_ID in "${ACCOUNT_IDS[@]}"; do
-    echo "Processing Account ID: ${ACCOUNT_ID}..."
-    curl --silent --location --request POST "${UPDATE_ROLES_URL}" \
-         --header "X-OFB-TOKEN: ${HARDCODED_TOKEN}" \
-         --header "Content-Type: application/json" \
-         --data "{\"accountId\":\"${ACCOUNT_ID}\",\"roleIds\":${ROLE_IDS}}"
-    
-    if [ $? -eq 0 ]; then
-        echo -e "\nSuccess: Roles updated for account ${ACCOUNT_ID}"
-    else
-        echo -e "\nError: Failed to update roles for account ${ACCOUNT_ID}"
-        exit 1
-    fi
-done
-
-# -------------------------
-# 10. Fetch Branch Deployed Info from http://localhost:8090/status (Scheduler)
-# -------------------------
-echo -e "\nFetching the branch deployed information from Scheduler..."
-branch_deployed_scheduler=$(curl -X GET 'http://localhost:8090/status' | grep -oP '"Branch Deployed"\s*:\s*"\K[^"]+')
-if [ -n "$branch_deployed_scheduler" ]; then
-    echo "Branch Deployed for Scheduler is: $branch_deployed_scheduler"
-else
-    echo "Error: Failed to fetch 'branch deployed' info from Scheduler"
-    exit 1
-fi
+echo -e "\nAll post-clone steps completed successfully."
+exit 0
