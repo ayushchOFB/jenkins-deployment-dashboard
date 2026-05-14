@@ -11,7 +11,7 @@
 const cron = require('node-cron');
 const fs = require('fs');
 const yaml = require('js-yaml');
-const { triggerJob, fetchReleaseStatus, fetchBuild, fetchJobEnvMap } = require('./jenkinsService');
+const { triggerJob, fetchReleaseStatus, fetchBuild, fetchJobEnvMap, fetchBuildArtifact } = require('./jenkinsService');
 const { sendDeploymentNotification } = require('./chatNotificationService');
 const schedulerConfig = require('../scheduler.config');
 const config = require('../jobs.config');
@@ -22,6 +22,7 @@ let schedulerState = {
     lastRun: null,
     nextRun: null,
     currentRun: null,
+    pendingSanity: null,
     history: [],      // last 10 runs
 };
 
@@ -126,7 +127,51 @@ const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy } = {}) =
         schedulerState.history = schedulerState.history.slice(0, MAX_HISTORY);
     }
 
+    // Step 6: If pipeline succeeded, schedule the Sanity-Suite-OFB (DevTest)
+    // run after a cool-down so services settle before tests hit them.
+    scheduleSanityRun(runRecord);
+
     return runRecord;
+};
+
+// ── Post-deploy Sanity Trigger ───────────────────────────────────────────────
+
+let pendingSanityTimer = null;
+
+const scheduleSanityRun = (runRecord) => {
+    const sanity = schedulerConfig.SANITY;
+    if (!sanity || !sanity.ENABLED) {
+        console.log('[Scheduler] Sanity trigger disabled — skipping');
+        return;
+    }
+    if (runRecord.status !== 'SUCCESS') {
+        console.log(`[Scheduler] Pipeline status=${runRecord.status} — skipping sanity run`);
+        return;
+    }
+
+    if (pendingSanityTimer) {
+        clearTimeout(pendingSanityTimer);
+        pendingSanityTimer = null;
+    }
+
+    const delayMs = sanity.DELAY_MS;
+    const fireAt = new Date(Date.now() + delayMs).toISOString();
+    console.log(`[Scheduler] Sanity run (${sanity.JOB}) queued for ${fireAt} (in ${delayMs / 60000} min)`);
+    schedulerState.pendingSanity = { job: sanity.JOB, fireAt };
+
+    pendingSanityTimer = setTimeout(async () => {
+        pendingSanityTimer = null;
+        schedulerState.pendingSanity = null;
+        try {
+            console.log(`[Scheduler] Triggering ${sanity.JOB} with params:`, sanity.PARAMS);
+            await triggerJob(sanity.JOB, sanity.PARAMS);
+            console.log(`[Scheduler] ${sanity.JOB} triggered`);
+        } catch (err) {
+            console.error(`[Scheduler] Failed to trigger ${sanity.JOB}: ${err.message}`);
+        }
+    }, delayMs);
+    // Don't keep the event loop alive just for this timer
+    if (pendingSanityTimer.unref) pendingSanityTimer.unref();
 };
 
 // ── Job Discovery ────────────────────────────────────────────────────────────
@@ -212,6 +257,27 @@ const pollPipelineCompletion = async (previousBuildNumber = 0) => {
                     durationMs: s.durationMillis || 0,
                 };
             }));
+
+            // Merge in per-step post-clone results from the build artifact
+            // (postClone-summary.json). Falls back gracefully if artifact
+            // missing — e.g. older Jenkinsfile or scp failure.
+            const postCloneSteps = await fetchBuildArtifact(
+                PIPELINE_JOB,
+                releaseStatus.buildNumber,
+                'postClone-summary.json',
+            );
+            if (Array.isArray(postCloneSteps) && postCloneSteps.length > 0) {
+                postCloneSteps.forEach(s => {
+                    stages.push({
+                        job: `Post Clone: ${s.name}`,
+                        status: normaliseStageStatus(s.status),
+                        url: buildUrl,
+                        durationMs: s.durationMs || 0,
+                        error: s.error || '',
+                        group: 'postClone',
+                    });
+                });
+            }
 
             // Recalculate overall status based on actual results
             const hasFailures = stages.some(s => s.status === 'FAILED' || s.status === 'ERROR');
@@ -347,6 +413,12 @@ const stopScheduler = () => {
         cronTask.stop();
         cronTask = null;
         console.log('[Scheduler] Stopped');
+    }
+    if (pendingSanityTimer) {
+        clearTimeout(pendingSanityTimer);
+        pendingSanityTimer = null;
+        schedulerState.pendingSanity = null;
+        console.log('[Scheduler] Pending sanity timer cleared');
     }
 };
 
