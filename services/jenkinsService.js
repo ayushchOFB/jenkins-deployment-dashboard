@@ -392,6 +392,34 @@ const abortJob = async (jobName) => {
     }
 };
 
+/**
+ * Fetch a JSON artifact from a specific build.
+ * Returns parsed JSON or null if missing / unreadable.
+ */
+const fetchBuildArtifact = async (jobName, buildNumber, artifactPath) => {
+    const url = `${config.JENKINS_BASE_URL}/job/${encodeURIComponent(jobName)}/${buildNumber}/artifact/${artifactPath}`;
+    try {
+        const res = await fetch(url, {
+            headers: { Accept: 'application/json', ...getAuthHeader() },
+            timeout: 10000,
+        });
+        if (!res.ok) {
+            console.warn(`[Jenkins] artifact ${artifactPath} #${buildNumber}: HTTP ${res.status}`);
+            return null;
+        }
+        const text = await res.text();
+        try {
+            return JSON.parse(text);
+        } catch (parseErr) {
+            console.warn(`[Jenkins] artifact ${artifactPath} #${buildNumber}: invalid JSON`);
+            return null;
+        }
+    } catch (err) {
+        console.warn(`[Jenkins] artifact ${artifactPath} #${buildNumber} error: ${err.message}`);
+        return null;
+    }
+};
+
 module.exports = {
     fetchAllDeployments,
     fetchBuildHistory,
@@ -400,5 +428,6 @@ module.exports = {
     fetchReleaseStatus,
     fetchJobLogs,
     fetchBuild,
+    fetchBuildArtifact,
     abortJob,
 };
