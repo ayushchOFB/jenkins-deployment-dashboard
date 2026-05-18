@@ -35,8 +35,8 @@ module.exports = {
     ENABLED: process.env.SCHEDULER_ENABLED !== 'false',
 
     // ── Post-deploy Sanity Suite (DevTest) ───────────────────────────────────
-    // Triggered 30 min after the 8 AM pipeline finishes — only when overall
-    // status is SUCCESS. Skipped on any failure/abort.
+    // Triggered 30 min after the 8 AM pipeline finishes, regardless of
+    // pipeline status — sanity should run even when some deploys failed.
     SANITY: {
         ENABLED: process.env.SANITY_ENABLED !== 'false',
         JOB: 'Sanity-Suite-OFB',

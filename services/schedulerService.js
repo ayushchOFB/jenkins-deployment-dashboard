@@ -127,8 +127,9 @@ const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy } = {}) =
         schedulerState.history = schedulerState.history.slice(0, MAX_HISTORY);
     }
 
-    // Step 6: If pipeline succeeded, schedule the Sanity-Suite-OFB (DevTest)
-    // run after a cool-down so services settle before tests hit them.
+    // Step 6: Schedule the Sanity-Suite-OFB (DevTest) run after a cool-down
+    // so services settle before tests hit them. Runs regardless of pipeline
+    // outcome — sanity should report what's actually broken on uat1.
     scheduleSanityRun(runRecord);
 
     return runRecord;
@@ -144,10 +145,7 @@ const scheduleSanityRun = (runRecord) => {
         console.log('[Scheduler] Sanity trigger disabled — skipping');
         return;
     }
-    if (runRecord.status !== 'SUCCESS') {
-        console.log(`[Scheduler] Pipeline status=${runRecord.status} — skipping sanity run`);
-        return;
-    }
+    console.log(`[Scheduler] Pipeline finished (status=${runRecord.status}) — queuing sanity run regardless of outcome`);
 
     if (pendingSanityTimer) {
         clearTimeout(pendingSanityTimer);
