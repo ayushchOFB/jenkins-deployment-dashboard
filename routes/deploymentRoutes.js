@@ -4,6 +4,7 @@ const fs = require('fs');
 const yaml = require('js-yaml');
 const { fetchAllDeployments, fetchBuildHistory, triggerJob, fetchReleaseStatus, fetchJobLogs, fetchBuild, abortJob } = require('../services/jenkinsService');
 const { checkServerStatus } = require('../services/serverStatusService');
+const { watchManualDeployment } = require('../services/schedulerService');
 const config = require('../jobs.config');
 
 // GET /api/deployments
@@ -69,9 +70,20 @@ router.get('/jobs', (req, res) => {
 router.post('/trigger-release', async (req, res) => {
   try {
     const { branch, env, jobsToRelease, libsToDeploy, dryRun } = req.body;
-    
+
     if (!branch || !env) {
       return res.status(400).json({ error: 'Branch and Environment are required' });
+    }
+
+    // Snapshot current build number BEFORE triggering so the background
+    // watcher can wait for a strictly newer build. Skip for dry runs — no
+    // notification will be sent.
+    let previousBuildNumber = 0;
+    if (!dryRun) {
+      try {
+        const cur = await fetchReleaseStatus();
+        if (cur && cur.buildNumber) previousBuildNumber = cur.buildNumber;
+      } catch (_) { /* first-ever build / Jenkins flaky — fall back to 0 */ }
     }
 
     const params = {
@@ -82,7 +94,22 @@ router.post('/trigger-release', async (req, res) => {
       DRY_RUN: String(!!dryRun)
     };
 
+    const startedAt = new Date().toISOString();
     const result = await triggerJob('QA-Release-Deployment', params);
+
+    // Fire-and-forget Gchat watcher for real (non-dry-run) deploys.
+    if (!dryRun) {
+      watchManualDeployment({
+        branch,
+        env,
+        previousBuildNumber,
+        startedAt,
+        triggeredBy: 'release-manager',
+      }).catch(err => {
+        console.error('[Manual] Watcher unhandled error:', err.message);
+      });
+    }
+
     res.json({ success: true, message: 'Release triggered successfully', ...result });
   } catch (err) {
     console.error('POST /api/trigger-release error:', err);

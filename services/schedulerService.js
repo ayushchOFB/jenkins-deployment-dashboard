@@ -23,11 +23,19 @@ let schedulerState = {
     nextRun: null,
     currentRun: null,
     pendingSanity: null,
+    pendingRetry: null,
     history: [],      // last 10 runs
 };
 
 const MAX_HISTORY = 10;
 const PIPELINE_JOB = 'QA-Release-Deployment';
+
+// Trigger-failure retry: if the POST to Jenkins fails (network/auth/timeout),
+// the pipeline never started, so it's safe to retry the whole trigger after a
+// cool-down. Only the trigger is retried — pre-trigger errors (empty jobs.yaml)
+// and post-trigger errors (poll timeout) bypass this.
+const TRIGGER_MAX_RETRIES = 1;
+const TRIGGER_RETRY_DELAY_MS = 30 * 60 * 1000;
 
 // ── Core Pipeline ────────────────────────────────────────────────────────────
 
@@ -36,7 +44,7 @@ const PIPELINE_JOB = 'QA-Release-Deployment';
  * Triggers the Jenkins pipeline with all jobs, polls for completion,
  * then sends notification.
  */
-const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy } = {}) => {
+const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy, retryAttempt = 0 } = {}) => {
     const effectiveBranch = branch || schedulerConfig.DEFAULT_BRANCH;
     const effectiveEnv = env || schedulerConfig.TARGET_ENV;
     const startedAt = new Date().toISOString();
@@ -50,10 +58,12 @@ const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy } = {}) =
         status: 'RUNNING',
         results: [],
         notification: null,
+        retryAttempt,
     };
 
     schedulerState.currentRun = runRecord;
-    console.log(`[Scheduler] Starting scheduled deployment: env=${effectiveEnv}, branch=${effectiveBranch}`);
+    const attemptLabel = retryAttempt > 0 ? ` (retry ${retryAttempt}/${TRIGGER_MAX_RETRIES})` : '';
+    console.log(`[Scheduler] Starting scheduled deployment${attemptLabel}: env=${effectiveEnv}, branch=${effectiveBranch}`);
 
     try {
         // Step 1: Use custom job list if provided, otherwise fetch all deployable jobs
@@ -73,14 +83,32 @@ const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy } = {}) =
         } catch (_) { /* ignore — first ever build */ }
         console.log(`[Scheduler] Current latest build: #${previousBuildNumber}`);
 
-        // Step 3: Trigger the pipeline
-        await triggerJob(PIPELINE_JOB, {
-            RELEASE_BRANCH: effectiveBranch,
-            STG_ENV: effectiveEnv,
-            JOBS_TO_RELEASE: jobsToRelease.join(','),
-            LIBS_TO_DEPLOY: '',
-            DRY_RUN: 'false',
-        });
+        // Step 3: Trigger the pipeline. If this fails (Jenkins unreachable,
+        // network timeout, auth error), the pipeline never started — schedule
+        // a retry instead of falling through to the failure-notification path.
+        try {
+            await triggerJob(PIPELINE_JOB, {
+                RELEASE_BRANCH: effectiveBranch,
+                STG_ENV: effectiveEnv,
+                JOBS_TO_RELEASE: jobsToRelease.join(','),
+                LIBS_TO_DEPLOY: '',
+                DRY_RUN: 'false',
+            });
+        } catch (triggerErr) {
+            if (retryAttempt < TRIGGER_MAX_RETRIES) {
+                console.error(`[Scheduler] Trigger failed (attempt ${retryAttempt + 1}/${TRIGGER_MAX_RETRIES + 1}): ${triggerErr.message}`);
+                scheduleTriggerRetry({
+                    branch: effectiveBranch,
+                    env: effectiveEnv,
+                    jobs,
+                    triggeredBy: runRecord.triggeredBy,
+                    retryAttempt: retryAttempt + 1,
+                });
+                schedulerState.currentRun = null;
+                return { ...runRecord, status: 'RETRY_QUEUED', finishedAt: new Date().toISOString() };
+            }
+            throw triggerErr; // out of retries — let outer catch notify
+        }
         console.log('[Scheduler] Pipeline triggered, waiting for new build to start...');
 
         // Step 4: Wait for new build to appear and complete
@@ -133,6 +161,27 @@ const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy } = {}) =
     scheduleSanityRun(runRecord);
 
     return runRecord;
+};
+
+// ── Trigger-failure Retry ────────────────────────────────────────────────────
+
+let pendingRetryTimer = null;
+
+const scheduleTriggerRetry = (opts) => {
+    if (pendingRetryTimer) clearTimeout(pendingRetryTimer);
+
+    const fireAt = new Date(Date.now() + TRIGGER_RETRY_DELAY_MS).toISOString();
+    schedulerState.pendingRetry = { attempt: opts.retryAttempt, fireAt };
+    console.log(`[Scheduler] Retry attempt ${opts.retryAttempt}/${TRIGGER_MAX_RETRIES} queued for ${fireAt} (in ${TRIGGER_RETRY_DELAY_MS / 60000} min)`);
+
+    pendingRetryTimer = setTimeout(() => {
+        pendingRetryTimer = null;
+        schedulerState.pendingRetry = null;
+        runScheduledDeployment(opts).catch(err => {
+            console.error(`[Scheduler] Retry attempt ${opts.retryAttempt} unhandled error: ${err.message}`);
+        });
+    }, TRIGGER_RETRY_DELAY_MS);
+    if (pendingRetryTimer.unref) pendingRetryTimer.unref();
 };
 
 // ── Post-deploy Sanity Trigger ───────────────────────────────────────────────
@@ -418,6 +467,12 @@ const stopScheduler = () => {
         schedulerState.pendingSanity = null;
         console.log('[Scheduler] Pending sanity timer cleared');
     }
+    if (pendingRetryTimer) {
+        clearTimeout(pendingRetryTimer);
+        pendingRetryTimer = null;
+        schedulerState.pendingRetry = null;
+        console.log('[Scheduler] Pending retry timer cleared');
+    }
 };
 
 const getSchedulerState = () => {
@@ -431,6 +486,66 @@ const getSchedulerState = () => {
             webhookConfigured: !!schedulerConfig.GCHAT_WEBHOOK_URL,
         },
     };
+};
+
+// ── Manual Deployment Watcher (Release Manager UI) ───────────────────────────
+
+/**
+ * Polls a manually-triggered pipeline build and sends the same Gchat card as
+ * the cron flow. Runs in the background — the HTTP route should respond to
+ * the user immediately and then fire-and-forget this.
+ *
+ * Differs from runScheduledDeployment: no trigger retry, no sanity queueing.
+ * The trigger has already been done by the caller; this only watches.
+ */
+const watchManualDeployment = async ({ branch, env, previousBuildNumber, startedAt, triggeredBy }) => {
+    const runRecord = {
+        startedAt,
+        finishedAt: null,
+        branch,
+        env,
+        triggeredBy: triggeredBy || 'release-manager',
+        status: 'RUNNING',
+        results: [],
+        notification: null,
+    };
+
+    try {
+        const pipelineResult = await pollPipelineCompletion(previousBuildNumber);
+        runRecord.results = pipelineResult.stages;
+        runRecord.status = pipelineResult.overallStatus;
+        runRecord.buildUrl = pipelineResult.buildUrl;
+    } catch (err) {
+        console.error(`[Manual] Watcher poll error: ${err.message}`);
+        runRecord.status = 'ERROR';
+        runRecord.error = err.message;
+    }
+    runRecord.finishedAt = new Date().toISOString();
+
+    try {
+        const notifResult = await sendDeploymentNotification({
+            env,
+            branch,
+            startedAt: runRecord.startedAt,
+            finishedAt: runRecord.finishedAt,
+            overallStatus: runRecord.status,
+            results: runRecord.results.length > 0
+                ? runRecord.results
+                : [{ job: 'Pipeline', status: runRecord.status, url: runRecord.buildUrl || '' }],
+        });
+        runRecord.notification = notifResult;
+    } catch (err) {
+        console.error(`[Manual] Notification error: ${err.message}`);
+        runRecord.notification = { sent: false, reason: err.message };
+    }
+
+    // Add to history so manual deploys show up alongside scheduled ones.
+    schedulerState.history.unshift(runRecord);
+    if (schedulerState.history.length > MAX_HISTORY) {
+        schedulerState.history = schedulerState.history.slice(0, MAX_HISTORY);
+    }
+
+    return runRecord;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -453,6 +568,7 @@ module.exports = {
     initScheduler,
     stopScheduler,
     runScheduledDeployment,
+    watchManualDeployment,
     getSchedulerState,
     getDeployableJobs,
 };
