@@ -52,4 +52,17 @@ module.exports = {
             EvnVariables: '{}',
         },
     },
+
+    // ── Post-deploy Automation-Agent Sanity (extension flows) ────────────────
+    // Runs `node scripts/run-flow-bot.js --sanity` from the automation-agent
+    // repo after the same cool-down as the Jenkins sanity above. Reads
+    // sanityRunItems + auth from token.json in the automation-agent directory.
+    AGENT_SANITY: {
+        ENABLED: process.env.AGENT_SANITY_ENABLED !== 'false',
+        // Absolute path to automation-agent repo root. Override via env var on server.
+        AGENT_PATH: process.env.AUTOMATION_AGENT_PATH || require('path').resolve(__dirname, '../automation-agent'),
+        DELAY_MS: 30 * 60 * 1000,
+        // Max time to wait for the sanity batch to complete (ms) — 1 hour
+        TIMEOUT_MS: 60 * 60 * 1000,
+    },
 };
