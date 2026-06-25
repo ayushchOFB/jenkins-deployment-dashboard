@@ -11,6 +11,7 @@
 const cron = require('node-cron');
 const fs = require('fs');
 const yaml = require('js-yaml');
+const { spawn } = require('child_process');
 const { triggerJob, fetchReleaseStatus, fetchBuild, fetchJobEnvMap, fetchBuildArtifact } = require('./jenkinsService');
 const { sendDeploymentNotification } = require('./chatNotificationService');
 const schedulerConfig = require('../scheduler.config');
@@ -160,6 +161,10 @@ const runScheduledDeployment = async ({ branch, env, jobs, triggeredBy, retryAtt
     // outcome — sanity should report what's actually broken on uat1.
     scheduleSanityRun(runRecord);
 
+    // Step 7: Also run automation-agent sanity flows (extension sanity tab)
+    // after the same cool-down. Reads sanityRunItems + auth from token.json.
+    scheduleAgentSanityRun(runRecord);
+
     return runRecord;
 };
 
@@ -219,6 +224,73 @@ const scheduleSanityRun = (runRecord) => {
     }, delayMs);
     // Don't keep the event loop alive just for this timer
     if (pendingSanityTimer.unref) pendingSanityTimer.unref();
+};
+
+// ── Post-deploy Agent Sanity Runner ─────────────────────────────────────────
+
+let pendingAgentSanityTimer = null;
+
+const scheduleAgentSanityRun = (runRecord) => {
+    const cfg = schedulerConfig.AGENT_SANITY;
+    if (!cfg || !cfg.ENABLED) {
+        console.log('[Scheduler] Agent sanity trigger disabled — skipping');
+        return;
+    }
+
+    console.log(`[Scheduler] Pipeline finished (status=${runRecord.status}) — queuing agent sanity run`);
+
+    if (pendingAgentSanityTimer) {
+        clearTimeout(pendingAgentSanityTimer);
+        pendingAgentSanityTimer = null;
+    }
+
+    const delayMs = cfg.DELAY_MS;
+    const fireAt = new Date(Date.now() + delayMs).toISOString();
+    console.log(`[Scheduler] Agent sanity run queued for ${fireAt} (in ${delayMs / 60000} min)`);
+
+    pendingAgentSanityTimer = setTimeout(() => {
+        pendingAgentSanityTimer = null;
+        console.log(`[Scheduler] Spawning automation-agent sanity batch (cwd: ${cfg.AGENT_PATH})`);
+
+        const proc = spawn('node', ['scripts/run-flow-bot.js', '--sanity'], {
+            cwd: cfg.AGENT_PATH,
+            env: { ...process.env },
+            stdio: 'pipe',
+        });
+
+        proc.stdout.on('data', (data) => {
+            data.toString().split('\n').filter(Boolean).forEach(line =>
+                console.log(`[AgentSanity] ${line}`)
+            );
+        });
+        proc.stderr.on('data', (data) => {
+            data.toString().split('\n').filter(Boolean).forEach(line =>
+                console.error(`[AgentSanity] ERR ${line}`)
+            );
+        });
+        proc.on('close', (code) => {
+            if (code === 0) {
+                console.log('[AgentSanity] Sanity batch completed successfully');
+            } else {
+                console.error(`[AgentSanity] Sanity batch exited with code ${code}`);
+            }
+        });
+        proc.on('error', (err) => {
+            console.error(`[AgentSanity] Failed to spawn process: ${err.message}`);
+        });
+
+        // Optional timeout kill
+        if (cfg.TIMEOUT_MS) {
+            setTimeout(() => {
+                if (!proc.killed) {
+                    console.error(`[AgentSanity] Timeout (${cfg.TIMEOUT_MS / 60000} min) — killing process`);
+                    proc.kill('SIGTERM');
+                }
+            }, cfg.TIMEOUT_MS);
+        }
+    }, delayMs);
+
+    if (pendingAgentSanityTimer.unref) pendingAgentSanityTimer.unref();
 };
 
 // ── Job Discovery ────────────────────────────────────────────────────────────
@@ -321,9 +393,31 @@ const pollPipelineCompletion = async (previousBuildNumber = 0) => {
                         url: buildUrl,
                         durationMs: s.durationMs || 0,
                         error: s.error || '',
+                        note: s.note || '',
                         group: 'postClone',
                     });
                 });
+            } else {
+                // Artifact missing or empty — fall back to the pipeline stage status from wfapi.
+                // This ensures Gchat always shows something when post-clone ran but the summary
+                // wasn't captured (e.g. script crashed before write_summary, or scp back failed).
+                const pcStage = (releaseStatus.stages || []).find(s =>
+                    (s.name || '').toLowerCase().includes('post') &&
+                    (s.name || '').toLowerCase().includes('clone')
+                );
+                if (pcStage) {
+                    const stageStatus = normaliseStageStatus(pcStage.status);
+                    stages.push({
+                        job: 'Post Clone: (no step details captured)',
+                        status: stageStatus,
+                        url: buildUrl,
+                        durationMs: pcStage.durationMillis || 0,
+                        error: stageStatus !== 'SUCCESS'
+                            ? 'Post-clone script failed or summary file was not written — check if Redis/MySQL/ES/Mongo were down'
+                            : '',
+                        group: 'postClone',
+                    });
+                }
             }
 
             // Recalculate overall status based on actual results
@@ -472,6 +566,11 @@ const stopScheduler = () => {
         pendingRetryTimer = null;
         schedulerState.pendingRetry = null;
         console.log('[Scheduler] Pending retry timer cleared');
+    }
+    if (pendingAgentSanityTimer) {
+        clearTimeout(pendingAgentSanityTimer);
+        pendingAgentSanityTimer = null;
+        console.log('[Scheduler] Pending agent sanity timer cleared');
     }
 };
 
