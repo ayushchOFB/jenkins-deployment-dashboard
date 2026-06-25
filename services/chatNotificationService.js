@@ -115,8 +115,9 @@ const buildChatPayload = (summary) => {
     const abortedCount = abortedJobs.length;
     const totalCount   = deployResults.length;
 
-    const pcPassed = postCloneResults.filter(r => r.status === 'SUCCESS').length;
-    const pcFailed = postCloneResults.filter(r => r.status !== 'SUCCESS');
+    const pcRestarted = postCloneResults.filter(r => r.status === 'SUCCESS' && r.note);
+    const pcFailed    = postCloneResults.filter(r => r.status !== 'SUCCESS');
+    const pcPassed    = postCloneResults.filter(r => r.status === 'SUCCESS' && !r.note).length;
 
     const duration = finishedAt && startedAt
         ? formatDuration(new Date(finishedAt) - new Date(startedAt))
@@ -151,8 +152,8 @@ const buildChatPayload = (summary) => {
                     topLabel: 'Result',
                     text: resultText,
                     bottomLabel: postCloneResults.length > 0
-                        ? `Post-clone: ${pcPassed}/${postCloneResults.length}`
-                        : 'No post-clone',
+                        ? `Post-clone: ${pcPassed + pcRestarted.length}/${postCloneResults.length}${pcRestarted.length > 0 ? ` · ${pcRestarted.length} restarted` : ''}${pcFailed.length > 0 ? ` · ${pcFailed.length} failed` : ''}`
+                        : 'Post-clone: not run',
                 },
             },
         ],
@@ -196,39 +197,58 @@ const buildChatPayload = (summary) => {
     if (postCloneResults.length > 0) {
         const postCloneWidgets = [];
 
-        if (pcFailed.length === 0) {
+        // Show restarted services first (⚠️) — they succeeded but needed intervention
+        pcRestarted.forEach(s => {
+            const stepName = (s.job || '').replace(/^Post Clone:\s*/, '');
+            postCloneWidgets.push({
+                decoratedText: {
+                    text: `⚠️ <b>${esc(stepName)}</b>`,
+                    bottomLabel: esc(s.note),
+                    wrapText: true,
+                },
+            });
+        });
+
+        // Show failed steps (❌)
+        pcFailed.forEach(s => {
+            const stepName = (s.job || '').replace(/^Post Clone:\s*/, '');
+            const w = {
+                decoratedText: {
+                    text: `${getStatusEmoji(s.status)} <b>${esc(stepName)}</b>`,
+                    bottomLabel: s.status,
+                    wrapText: true,
+                },
+            };
+            if (s.error) {
+                w.decoratedText.text += `<br><font color="#666666">${esc(truncate(s.error, 200))}</font>`;
+            }
+            postCloneWidgets.push(w);
+        });
+
+        // Show clean pass count if no issues, or a summary if some had issues
+        if (pcRestarted.length === 0 && pcFailed.length === 0) {
             postCloneWidgets.push({
                 decoratedText: {
                     text: `🟢 <b>All ${postCloneResults.length} steps passed</b>`,
                     wrapText: true,
                 },
             });
-        } else {
-            pcFailed.forEach(s => {
-                const stepName = (s.job || '').replace(/^Post Clone:\s*/, '');
-                const w = {
-                    decoratedText: {
-                        text: `${getStatusEmoji(s.status)} <b>${esc(stepName)}</b>`,
-                        bottomLabel: s.status,
-                        wrapText: true,
-                    },
-                };
-                if (s.error) {
-                    w.decoratedText.text += `<br><font color="#666666">${esc(truncate(s.error, 200))}</font>`;
-                }
-                postCloneWidgets.push(w);
+        } else if (pcPassed > 0) {
+            postCloneWidgets.push({
+                textParagraph: {
+                    text: `<i>+ ${pcPassed} other step${pcPassed === 1 ? '' : 's'} passed</i>`,
+                },
             });
-            if (pcPassed > 0) {
-                postCloneWidgets.push({
-                    textParagraph: {
-                        text: `<i>+ ${pcPassed} other step${pcPassed === 1 ? '' : 's'} passed</i>`,
-                    },
-                });
-            }
         }
 
+        const pcHeader = pcFailed.length > 0
+            ? `🚨 <b>Post Clone (${pcPassed + pcRestarted.length}/${postCloneResults.length})</b>`
+            : pcRestarted.length > 0
+                ? `⚠️ <b>Post Clone (${pcPassed + pcRestarted.length}/${postCloneResults.length})</b>`
+                : `🧹 <b>Post Clone (${postCloneResults.length}/${postCloneResults.length})</b>`;
+
         sections.push({
-            header: `🧹 <b>Post Clone (${pcPassed}/${postCloneResults.length})</b>`,
+            header: pcHeader,
             widgets: postCloneWidgets,
         });
     }
