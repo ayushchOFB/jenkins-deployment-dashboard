@@ -9,6 +9,8 @@ STEP_NAMES=()
 STEP_STATUSES=()
 STEP_ERRORS=()
 STEP_DURATIONS=()
+STEP_NOTES=()
+CURRENT_STEP_NOTE=""
 HAS_FAILURE=0
 
 # Portable millisecond timestamp — GNU date (%N) on Linux, perl fallback
@@ -21,10 +23,12 @@ now_ms() {
     echo "$(($(date +%s) * 1000))"
 }
 
-# Run a step: name, then command. Captures status + duration + error msg.
+# Run a step: name, then command. Captures status + duration + error msg + optional note.
+# Step functions can set CURRENT_STEP_NOTE before returning to attach a note (e.g. "was DOWN, restarted").
 run_step() {
     local name="$1"; shift
     local start_ms end_ms dur_ms tmp_err status err_msg
+    CURRENT_STEP_NOTE=""
     echo ""
     echo "──[ STEP: ${name} ]────────────────────────────"
     start_ms=$(now_ms)
@@ -41,6 +45,7 @@ run_step() {
     STEP_NAMES+=("$name")
     STEP_STATUSES+=("$status")
     STEP_ERRORS+=("$err_msg")
+    STEP_NOTES+=("$CURRENT_STEP_NOTE")
     STEP_DURATIONS+=("$dur_ms")
     echo "──[ ${name}: ${status} (${dur_ms}ms) ]────────"
 }
@@ -52,8 +57,8 @@ write_summary() {
         for ((i = 0; i < n; i++)); do
             local sep=","
             [ $i -eq $((n - 1)) ] && sep=""
-            printf '  {"name":"%s","status":"%s","durationMs":%s,"error":"%s"}%s\n' \
-                "${STEP_NAMES[$i]}" "${STEP_STATUSES[$i]}" "${STEP_DURATIONS[$i]}" "${STEP_ERRORS[$i]}" "$sep"
+            printf '  {"name":"%s","status":"%s","durationMs":%s,"error":"%s","note":"%s"}%s\n' \
+                "${STEP_NAMES[$i]}" "${STEP_STATUSES[$i]}" "${STEP_DURATIONS[$i]}" "${STEP_ERRORS[$i]}" "${STEP_NOTES[$i]}" "$sep"
         done
         echo "]"
     } > "$SUMMARY_FILE"
@@ -181,8 +186,79 @@ step_sunion_jvsr_companies() {
 }
 
 # -------------------------
+# Pre-checklist: ensure Redis, MySQL, Elasticsearch, MongoDB are up
+# These run first — if any service is down and can't be started, the step
+# is marked FAILED in the summary but remaining steps still execute.
+# -------------------------
+
+check_and_start_redis() {
+    if redis-cli ping 2>/dev/null | grep -q "PONG"; then
+        echo "Redis is UP"; return 0
+    fi
+    echo "Redis is DOWN — starting..."
+    /data/redis-7.4.1/install/redis-server /data/redis/config/redis.conf &
+    sleep 5
+    if redis-cli ping 2>/dev/null | grep -q "PONG"; then
+        CURRENT_STEP_NOTE="Redis was DOWN — restarted successfully"
+        echo "Redis started successfully"; return 0
+    fi
+    echo "Redis FAILED to start"; return 1
+}
+
+check_and_start_mysql() {
+    if mysqladmin ping --connect-timeout=5 2>/dev/null | grep -q "alive"; then
+        echo "MySQL is UP"; return 0
+    fi
+    echo "MySQL is DOWN — starting..."
+    mysqld --user=mysql &
+    sleep 10
+    if mysqladmin ping --connect-timeout=5 2>/dev/null | grep -q "alive"; then
+        CURRENT_STEP_NOTE="MySQL was DOWN — restarted successfully"
+        echo "MySQL started successfully"; return 0
+    fi
+    echo "MySQL FAILED to start"; return 1
+}
+
+check_and_start_elasticsearch() {
+    # Use process check — ES runs as ubuntu user from /data/elastic7
+    if pgrep -f "org.elasticsearch.bootstrap.Elasticsearch" > /dev/null 2>&1; then
+        echo "Elasticsearch is UP"; return 0
+    fi
+    echo "Elasticsearch is DOWN — starting..."
+    chown -R ubuntu: /data/elastic7/ /dbdata/elastic
+    su ubuntu /data/elastic7/install/bin/elasticsearch > /dev/null 2>&1 &
+    sleep 15
+    if pgrep -f "org.elasticsearch.bootstrap.Elasticsearch" > /dev/null 2>&1; then
+        CURRENT_STEP_NOTE="Elasticsearch was DOWN — restarted successfully"
+        echo "Elasticsearch started successfully"; return 0
+    fi
+    echo "Elasticsearch FAILED to start"; return 1
+}
+
+check_and_start_mongo() {
+    if mongosh --eval "db.runCommand({ping:1})" --quiet 2>/dev/null | grep -q "ok"; then
+        echo "MongoDB is UP"; return 0
+    fi
+    echo "MongoDB is DOWN — starting..."
+    mkdir -p /data/mongodb/logs
+    /usr/bin/mongod --logpath=/data/mongodb/logs/mongod.log --wiredTigerCacheSizeGB=1 \
+        --bind_ip 0.0.0.0 --dbpath=/dbdata/mongo --port 27017 &
+    sleep 10
+    if mongosh --eval "db.runCommand({ping:1})" --quiet 2>/dev/null | grep -q "ok"; then
+        CURRENT_STEP_NOTE="MongoDB was DOWN — restarted successfully"
+        echo "MongoDB started successfully"; return 0
+    fi
+    echo "MongoDB FAILED to start"; return 1
+}
+
+# -------------------------
 # Execute all steps (continue on failure — summary captures each one)
 # -------------------------
+
+run_step "Pre-check: Redis"          check_and_start_redis
+run_step "Pre-check: MySQL"          check_and_start_mysql
+run_step "Pre-check: Elasticsearch"  check_and_start_elasticsearch
+run_step "Pre-check: MongoDB"        check_and_start_mongo
 
 run_step "Redis: DEVELOPER_KEY_VALUE"            step_set_developer_key
 run_step "Redis: VERIFY_LINK_MAX_RETRY_COUNT"    step_set_verify_link_retry
