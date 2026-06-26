@@ -7,7 +7,7 @@
 
 module.exports = {
     // Cron expression: 08:00 AM every day
-    CRON_SCHEDULE: '0 8 * * *',
+    CRON_SCHEDULE: '0 6 * * *',
 
     // Target environment for scheduled deployments
     TARGET_ENV: 'uat1',
@@ -25,7 +25,7 @@ module.exports = {
     POLL_INTERVAL_MS: 15000,
 
     // Max time to wait for pipeline completion (ms) — 2 hours
-    POLL_TIMEOUT_MS: 2 * 60 * 60 * 1000,
+    POLL_TIMEOUT_MS: 4 * 60 * 60 * 1000,
 
     // Webhook retry settings
     WEBHOOK_MAX_RETRIES: 3,
