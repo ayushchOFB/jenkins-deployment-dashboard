@@ -196,7 +196,7 @@ check_and_start_redis() {
         echo "Redis is UP"; return 0
     fi
     echo "Redis is DOWN — starting..."
-    /data/redis-7.4.1/install/redis-server /data/redis/config/redis.conf &
+    /data/redis-7.4.1/install/redis-server /data/redis/config/redis.conf > /dev/null 2>&1 &
     sleep 5
     if redis-cli ping 2>/dev/null | grep -q "PONG"; then
         CURRENT_STEP_NOTE="Redis was DOWN — restarted successfully"
@@ -210,7 +210,7 @@ check_and_start_mysql() {
         echo "MySQL is UP"; return 0
     fi
     echo "MySQL is DOWN — starting..."
-    mysqld --user=mysql &
+    mysqld --user=mysql > /dev/null 2>&1 &
     sleep 10
     if mysqladmin ping --connect-timeout=5 2>/dev/null | grep -q "alive"; then
         CURRENT_STEP_NOTE="MySQL was DOWN — restarted successfully"
@@ -242,7 +242,7 @@ check_and_start_mongo() {
     echo "MongoDB is DOWN — starting..."
     mkdir -p /data/mongodb/logs
     /usr/bin/mongod --logpath=/data/mongodb/logs/mongod.log --wiredTigerCacheSizeGB=1 \
-        --bind_ip 0.0.0.0 --dbpath=/dbdata/mongo --port 27017 &
+        --bind_ip 0.0.0.0 --dbpath=/dbdata/mongo --port 27017 > /dev/null 2>&1 &
     sleep 10
     if mongosh --eval "db.runCommand({ping:1})" --quiet 2>/dev/null | grep -q "ok"; then
         CURRENT_STEP_NOTE="MongoDB was DOWN — restarted successfully"
