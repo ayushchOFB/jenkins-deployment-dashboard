@@ -29,9 +29,14 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`📊  Dashboard at    http://localhost:${PORT}`);
     console.log('🔗  API base at     http://localhost:5001/api');
     console.log('');
-    console.log('⚠️   Jenkins auth: set JENKINS_USER and JENKINS_TOKEN env vars');
-    console.log('     e.g.  JENKINS_USER=admin JENKINS_TOKEN=xxx node index.js');
-    console.log('');
+    if (!process.env.JENKINS_USER || !process.env.JENKINS_TOKEN) {
+        console.log('⚠️   Jenkins auth: set JENKINS_USER and JENKINS_TOKEN env vars');
+        console.log('     e.g.  JENKINS_USER=admin JENKINS_TOKEN=xxx node index.js');
+        console.log('');
+    } else {
+        console.log(`🔐  Jenkins auth: ${process.env.JENKINS_USER} (token ${process.env.JENKINS_TOKEN.slice(0, 6)}…)`);
+        console.log('');
+    }
 
     // Initialize scheduler after server is up
     initScheduler();
