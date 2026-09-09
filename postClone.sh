@@ -174,7 +174,7 @@ step_update_user_roles() {
         "975504741243032517"
         "1137827966831565841"
     )
-    local ROLE_IDS='["753448627875093653","715296915872291137","6097201248748967261","1073151533970889804"]'
+    local ROLE_IDS='["1365117563758975105"]'
     local URL="https://${machineName}-api.ofbusiness.co.in/api/v1/internal/updateroles?key=1"
     for ACCOUNT_ID in "${ACCOUNT_IDS[@]}"; do
         echo "Account: ${ACCOUNT_ID}"
