@@ -186,6 +186,21 @@ step_update_user_roles() {
     return $fail
 }
 
+step_remove_date_range_permission() {
+    mysql ofb -e "
+        UPDATE rolePermissionMapping
+        SET
+            isDeleted = 1,
+            lastModified = UNIX_TIMESTAMP() * 1000,
+            lastModifiedBy = '978054312255034071'
+        WHERE roleId = '1365117563758975105'
+          AND permissionId = 12
+          AND permissionName = 'canViewSpecificDateRangeDataOnly'
+          AND namespace = 'ofb'
+          AND isDeleted = 0;
+    "
+}
+
 step_sunion_jvsr_companies() {
     redis-cli SUNIONSTORE jvsrCompanyNameSpaces:ofb groupCompanyNameSpaces:ofb
 }
@@ -279,6 +294,7 @@ run_step "Redis: del BKALERT 7166"                step_delete_bkalert
 run_step "Redis: del SYSTEM_ACCOUNT_TOKENs"       step_delete_system_account_tokens
 run_step "Mongo: informer.consumerAccessKey"      step_mongo_consumer_access_key
 run_step "Update user roles"                      step_update_user_roles
+run_step "MySQL: remove canViewSpecificDateRangeDataOnly" step_remove_date_range_permission
 run_step "Redis: SUNIONSTORE jvsrCompanyNameSpaces:ofb" step_sunion_jvsr_companies
 
 write_summary
