@@ -153,6 +153,11 @@ step_delete_bkalert() {
     redis-cli del BKALERT 7166
 }
 
+step_delete_system_account_tokens() {
+    redis-cli del OXYZO_SYSTEM_ACCOUNT_TOKEN
+    redis-cli del SYSTEM_ACCOUNT_TOKEN
+}
+
 step_mongo_consumer_access_key() {
     mongosh --eval 'use informer; db.consumerAccessKey.remove({}); db.consumerAccessKey.insertOne({ host: "OFB", accessKey: "990783347078729731", active: true });'
 }
@@ -271,6 +276,7 @@ run_step "Branch Deployed: File Server"           step_branch_deployed_fileserve
 run_step "Branch Deployed: Scheduler"             step_branch_deployed_scheduler
 run_step "Redis: poSupplierCounter -> 1000"      step_duplicate_po_fix
 run_step "Redis: del BKALERT 7166"                step_delete_bkalert
+run_step "Redis: del SYSTEM_ACCOUNT_TOKENs"       step_delete_system_account_tokens
 run_step "Mongo: informer.consumerAccessKey"      step_mongo_consumer_access_key
 run_step "Update user roles"                      step_update_user_roles
 run_step "Redis: SUNIONSTORE jvsrCompanyNameSpaces:ofb" step_sunion_jvsr_companies
