@@ -7,7 +7,7 @@ APP_NAME="jenkins-dashboard"
 
 echo "--- Starting Deployment to UAT2 ---"
 
-# Ensure we are in the right directory or clone if missing
+# Ensure we are in the right directory or clone if missing it is
 if [ ! -d "$TARGET_DIR" ]; then
     echo "🚀 Cloning repository into $TARGET_DIR..."
     git clone "$REPO_URL" "$TARGET_DIR"
