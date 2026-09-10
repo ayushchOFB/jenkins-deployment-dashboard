@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-REPO_URL="git@github-office:vinayakbansal-ofb/jenkins-deployment-dashboard.git"
+REPO_URL="git@github.com:ayushchOFB/jenkins-deployment-dashboard.git"
 TARGET_DIR="/root/jenkins-dashboard"
 APP_NAME="jenkins-dashboard"
 
