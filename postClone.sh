@@ -71,7 +71,7 @@ write_summary() {
 
 EMAILS=("priyanshugoel@gmail.com" "priyanshu.goel@ofbusiness.in" "ayush.chaudhary@ofbusiness.in"
         "ankit.gupta@ofbusiness.in" "rankit.dalal@ofbusiness.in"
-        "tushar.garg@ofbusiness.in" "shantanu.singh@ofbusiness.in")
+        "tushar.garg@ofbusiness.in")
 MOBILE_NUMBERS=("9818434239" "9005444066" "7906775150" "9044518006" "8929383776" "9557342354")
 
 echo -e "\nFollowing script will whitelist the following email IDs and mobile numbers:"
