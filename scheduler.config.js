@@ -6,8 +6,8 @@
  */
 
 module.exports = {
-    // Cron expression: 08:00 AM every day
-    CRON_SCHEDULE: '0 6 * * *',
+    // Cron expression: 09:30 AM every day
+    CRON_SCHEDULE: '30 9 * * *',
 
     // Target environment for scheduled deployments
     TARGET_ENV: 'uat1',
