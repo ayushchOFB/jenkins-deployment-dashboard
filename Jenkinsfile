@@ -12,7 +12,7 @@ pipeline {
         choice(name: 'STG_ENV', choices: ['stg1', 'stg2', 'stg3', 'stg4', 'stg5', 'stg6', 'stg7', 'stg8', 'stg9', 'stg10', 'uat1', 'uat2'], description: 'Deploy target')
         text(name: 'JOBS_TO_RELEASE', defaultValue: '', description: 'Selected jobs (comma or newline separated)')
         text(name: 'LIBS_TO_DEPLOY', defaultValue: '', description: 'Optional libs to deploy')
-        string(name: 'NOTIFY_EMAIL', defaultValue: 'vinayak.bansal@ofbusiness.in', description: 'Reporting emails')
+        string(name: 'NOTIFY_EMAIL', defaultValue: 'ankit.gupta@ofbusiness.in', description: 'Reporting emails')
         string(name: 'GCHAT_WEBHOOK_URL', defaultValue: '', description: 'GChat Hook')
         booleanParam(name: 'DR_RUN', defaultValue: false, description: 'Dry Run mode') // Match dashboard key if needed
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Dry Run mode')
