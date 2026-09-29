@@ -35,12 +35,12 @@ module.exports = {
     ENABLED: process.env.SCHEDULER_ENABLED !== 'false',
 
     // ── Post-deploy Sanity Suite (DevTest) ───────────────────────────────────
-    // Triggered 30 min after the 8 AM pipeline finishes, regardless of
+    // Triggered 2 hrs after the scheduled pipeline finishes, regardless of
     // pipeline status — sanity should run even when some deploys failed.
     SANITY: {
         ENABLED: process.env.SANITY_ENABLED !== 'false',
         JOB: 'Sanity-Suite-OFB',
-        DELAY_MS: 30 * 60 * 1000,
+        DELAY_MS: 2 * 60 * 60 * 1000,
         PARAMS: {
             branchName: 'master',
             env_platform: 'STAGING',
@@ -61,7 +61,7 @@ module.exports = {
         ENABLED: process.env.AGENT_SANITY_ENABLED !== 'false',
         // Absolute path to automation-agent repo root. Override via env var on server.
         AGENT_PATH: process.env.AUTOMATION_AGENT_PATH || require('path').resolve(__dirname, '../automation-agent'),
-        DELAY_MS: 30 * 60 * 1000,
+        DELAY_MS: 2 * 60 * 60 * 1000,
         // Max time to wait for the sanity batch to complete (ms) — 1 hour
         TIMEOUT_MS: 60 * 60 * 1000,
     },
